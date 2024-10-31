@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -58,6 +57,14 @@ pipeline {
                         env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
                         env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
 
+                        writeFile file: 'target/allure-results/environment.properties', text: """
+                            Platform=${env.PLATFORM_NAME}
+                            Browser=${env.BROWSER}
+                            Test Framework=Cucumber
+                            Language=FR
+                        """.stripIndent()
+                    } else {
+                        // Eğer yapılandırma dosyası yoksa, varsayılan değerleri kullan
                         writeFile file: 'target/allure-results/environment.properties', text: """
                             Platform=${env.PLATFORM_NAME}
                             Browser=${env.BROWSER}
