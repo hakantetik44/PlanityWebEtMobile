@@ -35,7 +35,11 @@ public class Hooks {
 
         try {
             // Ortam bilgilerini Allure'a yükler
+<<<<<<< HEAD
             infosTest.loadConfigurationProperties();
+=======
+            loadConfigurationProperties();
+>>>>>>> f180a43 (fist)
 
             // Platformu belirle
             OS.OS = ConfigReader.getProperty("platformName");
@@ -77,6 +81,24 @@ public class Hooks {
     }
 
     // Configuration properties dosyasından Allure environment değişkenlerini yükleyen metot
+<<<<<<< HEAD
+=======
+    private void loadConfigurationProperties() {
+        Properties properties = new Properties();
+
+        try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
+            properties.load(input);
+
+            // browser ve platformName bilgilerini Allure raporuna ekler
+            Allure.parameter("Browser", properties.getProperty("browser"));
+            Allure.parameter("Platform Name", properties.getProperty("platformName"));
+
+            System.out.println("Allure environment değişkenleri configuration.properties dosyasından yüklendi.");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+>>>>>>> f180a43 (fist)
 
     @Given("Je lance l'application")
     public void lanceApp() {
