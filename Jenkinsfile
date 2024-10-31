@@ -1,4 +1,4 @@
-```groovy
+
 pipeline {
     agent any
 
@@ -169,4 +169,3 @@ ${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
         }
     }
 }
-```
