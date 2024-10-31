@@ -25,11 +25,13 @@ public class Hooks {
     public static final String URL_WEB = "https://www.radiofrance.fr/franceculture";
     protected WebDriverWait attente;
     private TestManager infosTest;
-    private static boolean isFirstTest = true;
+    private static final boolean isFirstTest = true;
 
     @Before
     public void avantTout(Scenario scenario) {
+
         try {
+            infosTest.loadConfigurationProperties();
             // Définir la plateforme
             OS.OS = ConfigReader.getProperty("platformName");
 

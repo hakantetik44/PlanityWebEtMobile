@@ -1,10 +1,12 @@
 
 package utils;
 
+import io.qameta.allure.Allure;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -619,6 +621,22 @@ public class TestManager {
                         e -> e.getKey().replace("error_", ""),
                         Map.Entry::getValue
                 ));
+    }
+
+    public void loadConfigurationProperties() {
+        Properties properties = new Properties();
+
+        try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
+            properties.load(input);
+
+            // `browser` ve `platformName` gibi environment bilgilerini Allure'a ekleme
+            Allure.parameter("Browser", properties.getProperty("browser"));
+            Allure.parameter("Platform Name", properties.getProperty("platformName"));
+
+            System.out.println("Allure environment değişkenleri configuration.properties dosyasından yüklendi.");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     // Test önerileri güncelle
