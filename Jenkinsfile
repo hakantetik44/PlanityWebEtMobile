@@ -1,3 +1,4 @@
+```groovy
 pipeline {
     agent any
 
@@ -39,11 +40,6 @@ pipeline {
                     cleanWs()
                     checkout scm
 
-                    // Varsayılan değerler
-                    env.PLATFORM_NAME = params.PLATFORM_NAME ?: 'Web'
-                    env.BROWSER = params.PLATFORM_NAME == 'Web' ? (params.BROWSER ?: 'chrome') : ''
-
-                    // Properties dosyasını kontrol et ve oku
                     if (fileExists('src/test/resources/configuration.properties')) {
                         def configContent = sh(
                             script: 'cat src/test/resources/configuration.properties',
@@ -59,18 +55,23 @@ pipeline {
                             }
                         }
 
-                        if (props.platformName) env.PLATFORM_NAME = props.platformName
-                        if (props.browser && env.PLATFORM_NAME == 'Web') env.BROWSER = props.browser
+                        env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
+                        env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
+
+                        writeFile file: 'target/allure-results/environment.properties', text: """
+                            Platform=${env.PLATFORM_NAME}
+                            Browser=${env.BROWSER}
+                            Test Framework=Cucumber
+                            Language=FR
+                        """.stripIndent()
                     }
 
-                    echo """Configuration actuelle:
+                    echo """Configuration:
                     • Plateforme: ${env.PLATFORM_NAME}
                     • Navigateur: ${env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'}"""
 
                     sh """
                         mkdir -p ${EXCEL_REPORTS} ${ALLURE_RESULTS} target/screenshots
-
-                        echo "=== Vérification de l'environnement ==="
                         export JAVA_HOME=${JAVA_HOME}
                         java -version
                         ${M2_HOME}/bin/mvn -version
@@ -124,7 +125,7 @@ pipeline {
                 script {
                     try {
                         allure([
-                            includeProperties: false,
+                            includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
@@ -168,3 +169,4 @@ ${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
         }
     }
 }
+```
