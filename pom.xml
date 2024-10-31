@@ -190,6 +190,11 @@
             <artifactId>deeplearning4j-core</artifactId>
             <version>1.0.0-beta7</version>
         </dependency>
+        <dependency>
+            <groupId>org.seleniumhq.selenium</groupId>
+            <artifactId>selenium-devtools-v121</artifactId>
+            <version>${selenium.version}</version>
+        </dependency>
     </dependencies>
 
     <repositories>

@@ -123,21 +123,8 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Properties dosyasından platformName'i oku
-                        def configProps = readFile('src/test/resources/configuration.properties').readLines()
-                            .findAll { it.startsWith('platformName=') }
-                            .collect { it.split('=')[1].trim() }
-                        def platform = configProps ? configProps[0] : 'Web'
-
-                        // Allure environment.properties oluştur
-                        writeFile file: 'target/allure-results/environment.properties', text: """
-                            Platform=${platform}
-                            Test Framework=Cucumber
-                            Language=FR
-                        """.stripIndent()
-
                         allure([
-                            includeProperties: true,
+                            includeProperties: false,
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
@@ -158,8 +145,7 @@ pipeline {
                 }
             }
         }
-        }
-
+    }
 
     post {
         always {
