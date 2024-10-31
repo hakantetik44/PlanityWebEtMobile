@@ -73,6 +73,10 @@ pipeline {
                         """.stripIndent()
                     }
 
+                    // Environment properties dosyasını kontrol et
+                    echo "Checking environment.properties contents:"
+                    sh "cat target/allure-results/environment.properties || echo 'File not found'"
+
                     echo """Configuration:
                     • Plateforme: ${env.PLATFORM_NAME}
                     • Navigateur: ${env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'}"""
@@ -132,7 +136,7 @@ pipeline {
                 script {
                     try {
                         allure([
-                            includeProperties: true,
+                            includeProperties: true,  // Bu ayar, environment.properties dosyasını içerecek şekilde ayarlanmış
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
