@@ -56,24 +56,19 @@ pipeline {
 
                         env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
                         env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
-
-                        writeFile file: 'target/allure-results/environment.properties', text: """
-                            Platform=${env.PLATFORM_NAME}
-                            Browser=${env.BROWSER}
-                            Test Framework=Cucumber
-                            Language=FR
-                        """.stripIndent()
                     } else {
-                        // Eğer yapılandırma dosyası yoksa, varsayılan değerleri kullan
-                        writeFile file: 'target/allure-results/environment.properties', text: """
-                            Platform=${env.PLATFORM_NAME}
-                            Browser=${env.BROWSER}
-                            Test Framework=Cucumber
-                            Language=FR
-                        """.stripIndent()
+                        env.PLATFORM_NAME = params.PLATFORM_NAME ?: 'Web'
+                        env.BROWSER = env.PLATFORM_NAME == 'Web' ? params.BROWSER ?: 'chrome' : ''
                     }
 
-                    // Environment properties dosyasını kontrol et
+                    writeFile file: 'target/allure-results/environment.properties', text: """
+                        Platform=${env.PLATFORM_NAME}
+                        Browser=${env.BROWSER}
+                        Test Framework=Cucumber
+                        Language=FR
+                    """.stripIndent()
+
+                    // Dosyanın içeriğini kontrol et
                     echo "Checking environment.properties contents:"
                     sh "cat target/allure-results/environment.properties || echo 'File not found'"
 
@@ -136,9 +131,9 @@ pipeline {
                 script {
                     try {
                         allure([
-                            includeProperties: true,  // Bu ayar, environment.properties dosyasını içerecek şekilde ayarlanmış
+                            includeProperties: true,  // Environment dosyasını dahil et
                             reportBuildPolicy: 'ALWAYS',
-                            results: [[path: "${ALLURE_RESULTS}"]]
+                            results: [[path: "${ALLURE_RESULTS}"]]  // Allure sonuçlarının yolu
                         ])
 
                         sh """
