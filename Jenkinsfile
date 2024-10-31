@@ -68,10 +68,6 @@ pipeline {
                         Language=FR
                     """.stripIndent()
 
-                    // Dosyanın içeriğini kontrol et
-                    echo "Checking environment.properties contents:"
-                    sh "cat target/allure-results/environment.properties || echo 'File not found'"
-
                     echo """Configuration:
                     • Plateforme: ${env.PLATFORM_NAME}
                     • Navigateur: ${env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'}"""
@@ -131,10 +127,13 @@ pipeline {
                 script {
                     try {
                         allure([
-                            includeProperties: true,  // Environment dosyasını dahil et
+                            includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
-                            results: [[path: "${ALLURE_RESULTS}"]]  // Allure sonuçlarının yolu
+                            results: [[path: "${ALLURE_RESULTS}"]]
                         ])
+
+                        // Excel raporu oluşturma işlemi
+                        createExcelReport()
 
                         sh """
                             if [ -d "${ALLURE_RESULTS}" ]; then
@@ -174,4 +173,57 @@ ${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
             cleanWs notFailBuild: true
         }
     }
+}
+
+// Excel raporunu oluşturmak için gerekli fonksiyon
+def createExcelReport() {
+    script {
+        // Apache POI veya benzeri bir kütüphane kullanarak Excel dosyasını oluşturun
+        def workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()
+        def sheet = workbook.createSheet('Rapports de Test')
+
+        // Başlık satırını oluştur
+        def header = sheet.createRow(0)
+        header.createCell(0).setCellValue('Test Case')
+        header.createCell(1).setCellValue('Dure (süre)')
+        header.createCell(2).setCellValue('Etape (adım)')
+
+        // Test sonuçlarını oku ve Excel'e yaz
+        def testOutput = readFile('test_output.log')
+        def testResults = parseTestResults(testOutput) // Parse fonksiyonu
+
+        int rowNum = 1
+        testResults.each { result ->
+            def row = sheet.createRow(rowNum++)
+            row.createCell(0).setCellValue(result.testCase)
+            row.createCell(1).setCellValue(result.duration) // Test süresi
+            row.createCell(2).setCellValue(result.step) // Test adımı
+        }
+
+        // Excel dosyasını kaydet
+        def fileOut = new FileOutputStream("${EXCEL_REPORTS}/Rapport_de_Test_${env.TIMESTAMP}.xlsx")
+        workbook.write(fileOut)
+        fileOut.close()
+        workbook.close()
+    }
+}
+
+// Test sonuçlarını parse eden fonksiyon
+def parseTestResults(testOutput) {
+    def results = []
+
+    // Test çıktılarını satır satır inceleyin
+    testOutput.eachLine { line ->
+        // Burada satırları kontrol ederek gerekli bilgileri alın
+        if (line.contains('Finished:')) {
+            def parts = line.split(' ')
+            def testCase = parts[1]  // Test case adını alın
+            def duration = parts[2]   // Süreyi alın (örneğin, 10s)
+            def step = 'Adım 1'  // Adım ismini burada doldurun (gerektiği şekilde özelleştirin)
+
+            results << [testCase: testCase, duration: duration, step: step]
+        }
+    }
+
+    return results
 }
