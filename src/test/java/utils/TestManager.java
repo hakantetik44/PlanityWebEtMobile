@@ -9,7 +9,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -28,8 +27,6 @@ public class TestManager {
     private String resultatReel;
     private String url;
     private String messageErreur;
-    private LocalDateTime startTime;
-    private LocalDateTime endTime;
     private LocalDateTime dateExecution;
 
     // Koleksiyonlar
@@ -77,16 +74,12 @@ public class TestManager {
         ));
     }
 
-
-
-    // Constructor'da başlangıç zamanını set edelim
     private TestManager() {
         rapportsTests = new ArrayList<>();
         analysisResults = new HashMap<>();
         stepPatterns = new HashMap<>();
         testSuggestions = new ArrayList<>();
         dateExecution = LocalDateTime.now();
-        startTime = LocalDateTime.now();
         createReportsDirectory();
         this.plateforme = PLATFORM;
     }
@@ -186,7 +179,6 @@ public class TestManager {
 
         if (!isDuplicate) {
             testInfo.dateExecution = LocalDateTime.now();
-            endTime = testInfo.dateExecution; // Her adımda bitiş zamanını güncelle
             rapportsTests.add(testInfo);
             updateAnalysis(testInfo);
             suggestNextSteps(testInfo);
@@ -387,7 +379,6 @@ public class TestManager {
     }
 
     // Excel sayfalarını oluşturma metodları
-    // Excel rapor oluşturma metodunu güncelleyelim
     private void createTestResultsSheet(Sheet sheet) {
         CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
         CellStyle successStyle = createSuccessStyle(sheet.getWorkbook());
@@ -410,8 +401,6 @@ public class TestManager {
 
         // Test verileri
         int rowNum = 1;
-        LocalDateTime previousTime = startTime;
-
         for (TestManager info : rapportsTests) {
             Row row = sheet.createRow(rowNum++);
 
@@ -428,35 +417,16 @@ public class TestManager {
             }
 
             row.createCell(3).setCellValue(info.getPlateforme() != null ? info.getPlateforme() : "");
-
-            // Beklenen sonuç ve URL'yi zorunlu olarak ekle
-            String expectedResult = info.getResultatAttendu();
-            if (expectedResult == null || expectedResult.trim().isEmpty()) {
-                expectedResult = "Vérification de " + info.getNomEtape();
-            }
-            row.createCell(4).setCellValue(expectedResult);
-
+            row.createCell(4).setCellValue(info.getResultatAttendu() != null ? info.getResultatAttendu() : "");
             row.createCell(5).setCellValue(info.getResultatReel() != null ? info.getResultatReel() : "");
-
-            // URL'yi zorunlu olarak ekle
-            String url = info.getUrl();
-            if (url == null || url.trim().isEmpty()) {
-                url = "https://www.radiofrance.fr/";  // Varsayılan URL
-            }
-            row.createCell(6).setCellValue(url);
-
+            row.createCell(6).setCellValue(info.getUrl() != null ? info.getUrl() : "");
             row.createCell(7).setCellValue(info.getMessageErreur() != null ? info.getMessageErreur() : "");
             row.createCell(8).setCellValue(
                     info.dateExecution.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
             );
-
-            // Süre hesaplama
-            Duration duration = Duration.between(previousTime, info.dateExecution);
-            long seconds = duration.getSeconds();
-            row.createCell(9).setCellValue(String.format("%ds", seconds));
-            previousTime = info.dateExecution;
         }
     }
+
     private void createAnalysisSheet(Sheet sheet) {
         CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
         int rowNum = 0;
@@ -655,68 +625,20 @@ public class TestManager {
 
     public void loadConfigurationProperties() {
         Properties properties = new Properties();
-        String configPath = System.getProperty("config.file", "config/configuration.properties");
 
-        try (FileInputStream input = new FileInputStream(configPath)) {
+        try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
             properties.load(input);
 
-            // Platform bilgisini al
-            String platformName = properties.getProperty("platformName", "Web");
-            this.plateforme = platformName;
+            // `browser` ve `platformName` gibi environment bilgilerini Allure'a ekleme
+            Allure.parameter("Browser", properties.getProperty("browser"));
+            Allure.parameter("Platform Name", properties.getProperty("platformName"));
 
-            // Environment bilgilerini Allure'a ekle
-            File allureResultsDir = new File(System.getProperty("allure.results.directory", "target/allure-results"));
-            if (!allureResultsDir.exists()) {
-                allureResultsDir.mkdirs();
-            }
-
-            // Environment.properties dosyasını oluştur
-            File envFile = new File(allureResultsDir, "environment.properties");
-            try (FileOutputStream output = new FileOutputStream(envFile)) {
-                Properties envProperties = new Properties();
-                properties.forEach((key, value) -> {
-                    if (key instanceof String && value instanceof String) {
-                        envProperties.setProperty((String)key, (String)value);
-                        // Aynı zamanda Allure parametresi olarak da ekle
-                        Allure.parameter((String)key, (String)value);
-                    }
-                });
-                envProperties.store(output, "Test Execution Environment");
-            }
-
-            System.out.println("Configuration loaded - Platform: " + platformName);
+            System.out.println("Allure environment değişkenleri configuration.properties dosyasından yüklendi.");
         } catch (IOException e) {
-            System.err.println("Error loading configuration.properties: " + e.getMessage());
-            setDefaultEnvironment();
+            e.printStackTrace();
         }
     }
 
-    private void setDefaultEnvironment() {
-        this.plateforme = "Web";
-        try {
-            File allureResultsDir = new File(System.getProperty("allure.results.directory", "target/allure-results"));
-            if (!allureResultsDir.exists()) {
-                allureResultsDir.mkdirs();
-            }
-
-            File envFile = new File(allureResultsDir, "environment.properties");
-            try (FileOutputStream output = new FileOutputStream(envFile)) {
-                Properties defaultProps = new Properties();
-                defaultProps.setProperty("Platform", "Web");
-                defaultProps.setProperty("Browser", "chrome");
-                defaultProps.setProperty("Environment", "QA");
-                defaultProps.setProperty("Test Suite", "Regression");
-                defaultProps.store(output, "Default Test Environment");
-
-                // Default değerleri Allure'a da ekle
-                defaultProps.forEach((key, value) ->
-                        Allure.parameter(key.toString(), value.toString())
-                );
-            }
-        } catch (IOException e) {
-            System.err.println("Error creating default environment.properties: " + e.getMessage());
-        }
-    }
     // Test önerileri güncelle
     private void updateTestSuggestions() {
         List<String> suggestions = new ArrayList<>();
@@ -742,5 +664,4 @@ public class TestManager {
         testSuggestions.addAll(suggestions);
     }
 }
-
 
