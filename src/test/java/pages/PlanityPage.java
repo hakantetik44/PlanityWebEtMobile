@@ -7,9 +7,9 @@ import utils.OS;
 
 import static utils.Driver.getCurrentDriver;
 
-public class RadioPage extends BasePage {
+public class PlanityPage extends BasePage {
 
-    public RadioPage() {
+    public PlanityPage() {
         super(getCurrentDriver());
         PageFactory.initElements(getCurrentDriver(), this);
     }
