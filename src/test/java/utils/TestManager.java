@@ -378,12 +378,13 @@ public class TestManager {
         }
     }
 
+    // Excel sayfalarını oluşturma metodları
     private void createTestResultsSheet(Sheet sheet) {
         CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
         CellStyle successStyle = createSuccessStyle(sheet.getWorkbook());
         CellStyle failureStyle = createFailureStyle(sheet.getWorkbook());
 
-        // Başlık satırı
+        // Başlık satırıl
         Row headerRow = sheet.createRow(0);
         String[] columns = {
                 "Scénario", "Étape", "Statut", "Plateforme",
@@ -400,8 +401,6 @@ public class TestManager {
 
         // Test verileri
         int rowNum = 1;
-        LocalDateTime previousStepTime = null;
-
         for (TestManager info : rapportsTests) {
             Row row = sheet.createRow(rowNum++);
 
@@ -425,15 +424,6 @@ public class TestManager {
             row.createCell(8).setCellValue(
                     info.dateExecution.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
             );
-
-            // Süre hesaplama
-            if (previousStepTime != null) {
-                long durationSeconds = java.time.Duration.between(previousStepTime, info.dateExecution).getSeconds();
-                row.createCell(9).setCellValue(String.format("%ds", durationSeconds));
-            } else {
-                row.createCell(9).setCellValue("0s");
-            }
-            previousStepTime = info.dateExecution;
         }
     }
 
@@ -635,39 +625,20 @@ public class TestManager {
 
     public void loadConfigurationProperties() {
         Properties properties = new Properties();
-        String configPath = System.getProperty("user.dir") + "/config/configuration.properties";
 
-        try (FileInputStream input = new FileInputStream(configPath)) {
+        try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
             properties.load(input);
 
-            // Platform bilgisini al ve Allure'a ekle
-            String platformName = properties.getProperty("platformName", "Web"); // Default değer Web
-            this.plateforme = platformName; // TestManager'ın platform değişkenini güncelle
+            // `browser` ve `platformName` gibi environment bilgilerini Allure'a ekleme
+            Allure.parameter("Browser", properties.getProperty("browser"));
+            Allure.parameter("Platform Name", properties.getProperty("platformName"));
 
-            // Allure environment bilgilerini ekle
-            Allure.parameter("Platform", platformName);
-            Allure.parameter("Browser", properties.getProperty("browser", "chrome"));
-            Allure.parameter("Environment", properties.getProperty("environment", "QA"));
-            Allure.parameter("Test Suite", properties.getProperty("testSuite", "Regression"));
-
-            // Her environment değişkenini ayrı ayrı ekle
-            properties.forEach((key, value) -> {
-                if (key instanceof String && value instanceof String) {
-                    Allure.parameter((String)key, (String)value);
-                }
-            });
-
-            System.out.println("Configuration loaded - Platform: " + platformName);
+            System.out.println("Allure environment değişkenleri configuration.properties dosyasından yüklendi.");
         } catch (IOException e) {
-            System.err.println("Error loading configuration.properties: " + e.getMessage());
-            // Varsayılan değerleri kullan
-            this.plateforme = "Web";
-            Allure.parameter("Platform", "Web");
-            Allure.parameter("Browser", "chrome");
-            Allure.parameter("Environment", "QA");
-            Allure.parameter("Test Suite", "Regression");
+            e.printStackTrace();
         }
     }
+
     // Test önerileri güncelle
     private void updateTestSuggestions() {
         List<String> suggestions = new ArrayList<>();
