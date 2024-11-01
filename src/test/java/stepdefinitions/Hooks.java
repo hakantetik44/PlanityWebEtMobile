@@ -1,4 +1,3 @@
-
 package stepdefinitions;
 
 import io.appium.java_client.android.AndroidDriver;
@@ -6,6 +5,7 @@ import io.cucumber.java.After;
 import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
 import io.cucumber.java.en.Given;
+import io.qameta.allure.Allure;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
@@ -18,24 +18,29 @@ import utils.OS;
 import utils.TestManager;
 import org.openqa.selenium.By;
 
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.time.Duration;
+import java.util.Properties;
 
 public class Hooks {
     public static final String NOM_APK = "radio-france.apk";
     public static final String URL_WEB = "https://www.radiofrance.fr/franceculture";
     protected WebDriverWait attente;
     private TestManager infosTest;
-    private static final boolean isFirstTest = true;
+    private static boolean isFirstTest = true;
 
     @Before
     public void avantTout(Scenario scenario) {
 
         try {
-            infosTest.loadConfigurationProperties();
-            // Définir la plateforme
+            // Ortam bilgilerini Allure'a yükler
+            loadConfigurationProperties();
+
+            // Platformu belirle
             OS.OS = ConfigReader.getProperty("platformName");
 
-            // Initialiser les informations pour le rapport de test
+            // Rapor bilgilerini başlat
             infosTest = TestManager.getInstance();
             infosTest.setNomScenario(scenario.getName());
             infosTest.setNomEtape("Début du Test");
@@ -57,7 +62,7 @@ public class Hooks {
 
             TestManager.getInstance().ajouterInfosTest(infosTest);
 
-            // Test önerilerini al ve göster
+            // Test önerilerini göster
             if (!infosTest.getTestSuggestions().isEmpty()) {
                 System.out.println("\n🤖 Suggestions pour ce test:");
                 infosTest.getTestSuggestions().forEach(s -> System.out.println("• " + s));
@@ -68,6 +73,23 @@ public class Hooks {
             infosTest.setMessageErreur("Erreur d'initialisation: " + e.getMessage());
             TestManager.getInstance().ajouterInfosTest(infosTest);
             throw new RuntimeException(e);
+        }
+    }
+
+    // Configuration properties dosyasından Allure environment değişkenlerini yükleyen metot
+    private void loadConfigurationProperties() {
+        Properties properties = new Properties();
+
+        try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
+            properties.load(input);
+
+            // browser ve platformName bilgilerini Allure raporuna ekler
+            Allure.parameter("Browser", properties.getProperty("browser"));
+            Allure.parameter("Platform Name", properties.getProperty("platformName"));
+
+            System.out.println("Allure environment değişkenleri configuration.properties dosyasından yüklendi.");
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
