@@ -11,6 +11,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -28,6 +29,8 @@ public class TestManager {
     private String url;
     private String messageErreur;
     private LocalDateTime dateExecution;
+    private LocalDateTime testStartTime;
+    private LocalDateTime testEndTime;
 
     // Koleksiyonlar
     private final List<TestManager> rapportsTests;
@@ -80,6 +83,7 @@ public class TestManager {
         stepPatterns = new HashMap<>();
         testSuggestions = new ArrayList<>();
         dateExecution = LocalDateTime.now();
+        testStartTime = LocalDateTime.now();
         createReportsDirectory();
         this.plateforme = PLATFORM;
     }
@@ -171,19 +175,7 @@ public class TestManager {
     }
 
     // Test adımı ekleme ve analiz
-    public void ajouterInfosTest(TestManager testInfo) {
-        if (testInfo == null) return;
 
-        boolean isDuplicate = rapportsTests.stream()
-                .anyMatch(existing -> isSameStep(existing, testInfo));
-
-        if (!isDuplicate) {
-            testInfo.dateExecution = LocalDateTime.now();
-            rapportsTests.add(testInfo);
-            updateAnalysis(testInfo);
-            suggestNextSteps(testInfo);
-        }
-    }
 
     // Dinamik test analizi
     private void updateAnalysis(TestManager testInfo) {
@@ -379,12 +371,26 @@ public class TestManager {
     }
 
     // Excel sayfalarını oluşturma metodları
+    public void ajouterInfosTest(TestManager testInfo) {
+        if (testInfo == null) return;
+
+        boolean isDuplicate = rapportsTests.stream()
+                .anyMatch(existing -> isSameStep(existing, testInfo));
+
+        if (!isDuplicate) {
+            testEndTime = LocalDateTime.now();
+            testInfo.dateExecution = testEndTime;
+            rapportsTests.add(testInfo);
+            updateAnalysis(testInfo);
+            suggestNextSteps(testInfo);
+        }
+    }
+
     private void createTestResultsSheet(Sheet sheet) {
         CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
         CellStyle successStyle = createSuccessStyle(sheet.getWorkbook());
         CellStyle failureStyle = createFailureStyle(sheet.getWorkbook());
 
-        // Başlık satırı
         Row headerRow = sheet.createRow(0);
         String[] columns = {
                 "Scénario", "Étape", "Statut", "Plateforme",
@@ -399,7 +405,6 @@ public class TestManager {
             sheet.setColumnWidth(i, 6000);
         }
 
-        // Test verileri
         int rowNum = 1;
         for (TestManager info : rapportsTests) {
             Row row = sheet.createRow(rowNum++);
@@ -424,9 +429,12 @@ public class TestManager {
             row.createCell(8).setCellValue(
                     info.dateExecution.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
             );
+
+            // Toplam test süresini hesapla ve göster
+            long totalDurationSeconds = ChronoUnit.SECONDS.between(testStartTime, testEndTime);
+            row.createCell(9).setCellValue(totalDurationSeconds + " s");
         }
     }
-
     private void createAnalysisSheet(Sheet sheet) {
         CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
         int rowNum = 0;
