@@ -655,7 +655,7 @@ public class TestManager {
 
     public void loadConfigurationProperties() {
         Properties properties = new Properties();
-        String configPath = System.getProperty("user.dir") + "/config/configuration.properties";
+        String configPath = System.getProperty("config.file", "config/configuration.properties");
 
         try (FileInputStream input = new FileInputStream(configPath)) {
             properties.load(input);
@@ -664,28 +664,25 @@ public class TestManager {
             String platformName = properties.getProperty("platformName", "Web");
             this.plateforme = platformName;
 
-            // Environment dosyası oluştur
-            File allureResultsDir = new File("target/allure-results");
+            // Environment bilgilerini Allure'a ekle
+            File allureResultsDir = new File(System.getProperty("allure.results.directory", "target/allure-results"));
             if (!allureResultsDir.exists()) {
                 allureResultsDir.mkdirs();
             }
 
-            // environment.properties dosyasını oluştur
+            // Environment.properties dosyasını oluştur
             File envFile = new File(allureResultsDir, "environment.properties");
             try (FileOutputStream output = new FileOutputStream(envFile)) {
                 Properties envProperties = new Properties();
-                envProperties.setProperty("Platform", platformName);
-                envProperties.setProperty("Browser", properties.getProperty("browser", "chrome"));
-                envProperties.setProperty("Environment", properties.getProperty("environment", "QA"));
-                envProperties.setProperty("Test Suite", properties.getProperty("testSuite", "Regression"));
-                envProperties.store(output, "Allure Environment Properties");
+                properties.forEach((key, value) -> {
+                    if (key instanceof String && value instanceof String) {
+                        envProperties.setProperty((String)key, (String)value);
+                        // Aynı zamanda Allure parametresi olarak da ekle
+                        Allure.parameter((String)key, (String)value);
+                    }
+                });
+                envProperties.store(output, "Test Execution Environment");
             }
-
-            // Allure parametrelerini de ekle
-            Allure.parameter("Platform", platformName);
-            Allure.parameter("Browser", properties.getProperty("browser", "chrome"));
-            Allure.parameter("Environment", properties.getProperty("environment", "QA"));
-            Allure.parameter("Test Suite", properties.getProperty("testSuite", "Regression"));
 
             System.out.println("Configuration loaded - Platform: " + platformName);
         } catch (IOException e) {
@@ -697,28 +694,28 @@ public class TestManager {
     private void setDefaultEnvironment() {
         this.plateforme = "Web";
         try {
-            File allureResultsDir = new File("target/allure-results");
+            File allureResultsDir = new File(System.getProperty("allure.results.directory", "target/allure-results"));
             if (!allureResultsDir.exists()) {
                 allureResultsDir.mkdirs();
             }
 
             File envFile = new File(allureResultsDir, "environment.properties");
             try (FileOutputStream output = new FileOutputStream(envFile)) {
-                Properties envProperties = new Properties();
-                envProperties.setProperty("Platform", "Web");
-                envProperties.setProperty("Browser", "chrome");
-                envProperties.setProperty("Environment", "QA");
-                envProperties.setProperty("Test Suite", "Regression");
-                envProperties.store(output, "Allure Environment Properties");
+                Properties defaultProps = new Properties();
+                defaultProps.setProperty("Platform", "Web");
+                defaultProps.setProperty("Browser", "chrome");
+                defaultProps.setProperty("Environment", "QA");
+                defaultProps.setProperty("Test Suite", "Regression");
+                defaultProps.store(output, "Default Test Environment");
+
+                // Default değerleri Allure'a da ekle
+                defaultProps.forEach((key, value) ->
+                        Allure.parameter(key.toString(), value.toString())
+                );
             }
         } catch (IOException e) {
             System.err.println("Error creating default environment.properties: " + e.getMessage());
         }
-
-        Allure.parameter("Platform", "Web");
-        Allure.parameter("Browser", "chrome");
-        Allure.parameter("Environment", "QA");
-        Allure.parameter("Test Suite", "Regression");
     }
     // Test önerileri güncelle
     private void updateTestSuggestions() {
