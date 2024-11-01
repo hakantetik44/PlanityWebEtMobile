@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -56,21 +57,14 @@ pipeline {
 
                         env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
                         env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
-                    } else {
-                        env.PLATFORM_NAME = params.PLATFORM_NAME ?: 'Web'
-                        env.BROWSER = env.PLATFORM_NAME == 'Web' ? params.BROWSER ?: 'chrome' : ''
+
+                        writeFile file: 'target/allure-results/environment.properties', text: """
+                            Platform=${env.PLATFORM_NAME}
+                            Browser=${env.BROWSER}
+                            Test Framework=Cucumber
+                            Language=FR
+                        """.stripIndent()
                     }
-
-                    writeFile file: 'target/allure-results/environment.properties', text: """
-                        Platform=${env.PLATFORM_NAME}
-                        Browser=${env.BROWSER}
-                        Test Framework=Cucumber
-                        Language=FR
-                    """.stripIndent()
-
-                    // Dosyanın içeriğini kontrol et
-                    echo "Checking environment.properties contents:"
-                    sh "cat target/allure-results/environment.properties || echo 'File not found'"
 
                     echo """Configuration:
                     • Plateforme: ${env.PLATFORM_NAME}
@@ -131,9 +125,9 @@ pipeline {
                 script {
                     try {
                         allure([
-                            includeProperties: true,  // Environment dosyasını dahil et
+                            includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
-                            results: [[path: "${ALLURE_RESULTS}"]]  // Allure sonuçlarının yolu
+                            results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
                         sh """
