@@ -18,18 +18,13 @@ pipeline {
         PDF_REPORTS = 'target/pdf-reports'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         VIDEO_DIR = "${PDF_REPORTS}/videos"
-        GIT_REPO_URL = 'https://github.com/hakantetik44/PlanityWebEtMobile.git'
     }
 
     parameters {
-        gitParameter(
+        choice(
             name: 'BRANCH_NAME',
-            type: 'PT_BRANCH',
-            defaultValue: 'main',
-            selectedValue: 'DEFAULT',
-            branchFilter: 'origin/(.*)',
-            description: 'Sélectionnez la branche à tester',
-            useRepository: GIT_REPO_URL
+            choices: ['main', 'dev', 'feature/*', 'bugfix/*'],
+            description: 'Sélectionnez la branche à tester'
         )
         choice(
             name: 'PLATFORM_NAME',
@@ -41,20 +36,32 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
+        booleanParam(
+            name: 'RECORD_VIDEO',
+            defaultValue: true,
+            description: 'Activer l\'enregistrement vidéo'
+        )
     }
 
     stages {
-        stage('Checkout Branch') {
+        stage('Branch Selection') {
             steps {
                 script {
-                    echo "🔄 Checkout de la branche: ${params.BRANCH_NAME}"
+                    // Mevcut branch'leri getir
+                    sh "git fetch --all"
+                    def branches = sh(
+                        script: 'git branch -r | grep -v HEAD | sed "s/origin\\///"',
+                        returnStdout: true
+                    ).trim().split('\n')
+
+                    echo "🌿 Available branches: ${branches.join(', ')}"
+
+                    // Seçilen branch'e geç
                     checkout([
                         $class: 'GitSCM',
-                        branches: [[name: "${params.BRANCH_NAME}"]],
-                        userRemoteConfigs: [[
-                            url: GIT_REPO_URL,
-                            credentialsId: 'git-credentials'
-                        ]]
+                        branches: [[name: "*/${params.BRANCH_NAME}"]],
+                        extensions: [],
+                        userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
                 }
             }
@@ -63,34 +70,23 @@ pipeline {
         stage('Initialisation') {
             steps {
                 script {
-                    echo "╔═══════════════════════════════╗\n║ Démarrage de l'Automatisation ║\n╚═══════════════════════════════╝"
+                    echo """╔═══════════════════════════════╗
+║ Démarrage de l'Automatisation ║
+╚═══════════════════════════════╝"""
 
-                    // Git branch info
-                    def branchInfo = sh(script: 'git branch -v', returnStdout: true).trim()
-                    echo "📂 Branche actuelle:\n${branchInfo}"
-
+                    // Create directories
                     sh """
                         mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${PDF_REPORTS}
                         mkdir -p target/screenshots
                         chmod -R 777 ${VIDEO_DIR}
-                        export JAVA_HOME=${JAVA_HOME}
-                        java -version
-                        ${M2_HOME}/bin/mvn -version
                     """
 
-                    // Create PDF report header
-                    writeFile file: 'test-report.md', text: """
-# Test Execution Report ${BUILD_NUMBER}
-## ${new Date().format('dd/MM/yyyy HH:mm')}
-
-### Configuration
-- Branch: ${params.BRANCH_NAME}
-- Platform: ${params.PLATFORM_NAME}
-- Browser: ${params.BROWSER}
-- Build: #${BUILD_NUMBER}
-
-### Test Steps:
-"""
+                    // Install ffmpeg if not present (for video recording)
+                    sh """
+                        if ! command -v ffmpeg &> /dev/null; then
+                            brew install ffmpeg || apt-get install -y ffmpeg || yum install -y ffmpeg
+                        fi
+                    """
                 }
             }
         }
@@ -101,9 +97,7 @@ pipeline {
                     try {
                         echo "📦 Installation des dépendances..."
                         sh "${M2_HOME}/bin/mvn clean install -DskipTests -B"
-                        sh "echo '✅ Construction: Installation des dépendances réussie' >> test-report.md"
                     } catch (Exception e) {
-                        sh "echo '❌ Construction: Échec de l'installation des dépendances' >> test-report.md"
                         currentBuild.result = 'FAILURE'
                         throw e
                     }
@@ -117,38 +111,53 @@ pipeline {
                     try {
                         echo "🧪 Lancement des tests..."
 
-                        sh """
-                            echo "### Video Recording Started" >> test-report.md
-                            ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
-                            -codec:v libx264 -r 30 -pix_fmt yuv420p \
-                            ${VIDEO_DIR}/test_execution_${BUILD_NUMBER}.mp4 \
-                            2>${PDF_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
-                        """
+                        if (params.RECORD_VIDEO) {
+                            // Start video recording with timestamp
+                            echo "🎥 Démarrage de l'enregistrement vidéo..."
+                            sh """
+                                DISPLAY=:0 ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
+                                -codec:v libx264 -r 30 -pix_fmt yuv420p \
+                                ${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4 \
+                                2>${PDF_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
+                            """
+                        }
 
+                        // Run tests
                         sh """
                             ${M2_HOME}/bin/mvn test \
                             -Dtest=runner.TestRunner \
                             -DplatformName=${params.PLATFORM_NAME} \
                             -Dbrowser=${params.BROWSER} \
                             -DvideoDir=${VIDEO_DIR} \
+                            -DrecordVideo=${params.RECORD_VIDEO} \
                             -DscreenshotsDir=target/screenshots \
                             -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-                            -Dallure.results.directory=${ALLURE_RESULTS} \
-                            -Dbranch=${params.BRANCH_NAME}
+                            -Dallure.results.directory=${ALLURE_RESULTS}
                         """
 
-                        sh "echo '✅ Tests: Exécution réussie' >> test-report.md"
                     } catch (Exception e) {
-                        sh "echo '❌ Tests: Échec de l'exécution' >> test-report.md"
                         currentBuild.result = 'FAILURE'
                         throw e
                     } finally {
-                        sh """
-                            if [ -f "${VIDEO_DIR}/recording.pid" ]; then
-                                kill \$(cat ${VIDEO_DIR}/recording.pid) || true
-                                rm ${VIDEO_DIR}/recording.pid
-                            fi
-                        """
+                        if (params.RECORD_VIDEO) {
+                            // Stop video recording
+                            echo "🎥 Arrêt de l'enregistrement vidéo..."
+                            sh """
+                                if [ -f "${VIDEO_DIR}/recording.pid" ]; then
+                                    kill \$(cat ${VIDEO_DIR}/recording.pid) || true
+                                    rm ${VIDEO_DIR}/recording.pid
+                                fi
+                            """
+                            // Check if video was created
+                            sh """
+                                if [ -f "${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4" ]; then
+                                    echo "✅ Vidéo enregistrée avec succès"
+                                    ls -lh ${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4
+                                else
+                                    echo "❌ Échec de l'enregistrement vidéo"
+                                fi
+                            """
+                        }
                     }
                 }
             }
@@ -158,12 +167,14 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Allure Report
                         allure([
                             includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
+                        // Cucumber Report
                         cucumber buildStatus: 'UNSTABLE',
                             reportTitle: '🌟 Planity Test Automation Report',
                             fileIncludePattern: '**/cucumber.json',
@@ -172,35 +183,21 @@ pipeline {
                                 ['key': '🌿 Branch', 'value': params.BRANCH_NAME],
                                 ['key': '🚀 Platform', 'value': params.PLATFORM_NAME],
                                 ['key': '🌐 Browser', 'value': params.BROWSER],
-                                ['key': '🎥 Video', 'value': 'Available']
+                                ['key': '🎥 Video', 'value': params.RECORD_VIDEO ? 'Enabled' : 'Disabled']
                             ]
 
-                        // Create PDF report
+                        // Archive test results
                         sh """
-                            echo "### Test Results" >> test-report.md
-                            echo "- Branch: ${params.BRANCH_NAME}" >> test-report.md
-                            echo "- Status: ${currentBuild.result ?: 'SUCCESS'}" >> test-report.md
-                            echo "- Duration: ${currentBuild.durationString}" >> test-report.md
-                            echo "\\n### Git Info" >> test-report.md
-                            git log -1 --pretty=format:"Commit: %h%nAuthor: %an%nDate: %ad%nMessage: %s" >> test-report.md
-                            echo "\\n### Links" >> test-report.md
-                            echo "- Allure Report: ${BUILD_URL}allure/" >> test-report.md
-                            echo "- Cucumber Report: ${BUILD_URL}cucumber-html-reports/" >> test-report.md
-                            echo "- Video Recording: ${BUILD_URL}artifact/${VIDEO_DIR}/" >> test-report.md
-                        """
-
-                        sh """
-                            # Convert to PDF and archive results
-                            markdown-pdf test-report.md -o ${PDF_REPORTS}/TestReport_${params.BRANCH_NAME}_${BUILD_NUMBER}.pdf
-                            cd target && zip -r test-results-${BUILD_NUMBER}.zip \
+                            cd target
+                            zip -r test-results-${BUILD_NUMBER}.zip \
                                 allure-results/ \
                                 cucumber-reports/ \
                                 screenshots/ \
-                                pdf-reports/
+                                ${params.RECORD_VIDEO ? 'pdf-reports/videos/' : ''}
                         """
 
+                        // Archive artifacts
                         archiveArtifacts artifacts: """
-                            ${PDF_REPORTS}/**/*.pdf,
                             ${VIDEO_DIR}/**/*.mp4,
                             target/test-results-${BUILD_NUMBER}.zip,
                             target/cucumber.json
@@ -230,20 +227,18 @@ pipeline {
 🕒 Durée: ${currentBuild.durationString}
 📱 Plateforme: ${params.PLATFORM_NAME}
 🌐 Navigateur: ${params.BROWSER}
+🎥 Video: ${params.RECORD_VIDEO ? 'Activé' : 'Désactivé'}
 
 📊 Rapports:
-🔹 PDF:       ${BUILD_URL}artifact/${PDF_REPORTS}/TestReport_${params.BRANCH_NAME}_${BUILD_NUMBER}.pdf
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
 🔹 Video:     ${BUILD_URL}artifact/${VIDEO_DIR}/
 
 ${statusEmoji} Statut Final: ${status}
 """
-                // Clean workspace
-                sh """
-                    find . -type f -name '*.tmp' -delete
-                    find . -type f -name '*.log' -mtime +7 -delete
-                """
+
+                // Cleanup
+                cleanWs(patterns: [[pattern: 'target/classes/', type: 'INCLUDE']])
             }
         }
     }
