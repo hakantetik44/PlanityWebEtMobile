@@ -95,20 +95,17 @@ pipeline {
                 script {
                     try {
                         echo "🧪 Lancement des tests..."
-
                         def mvnCommand = """
-                            ${M2_HOME}/bin/mvn test
-                            -Dtest=runner.TestRunner
-                            -DplatformName=${params.PLATFORM_NAME}
-                            -Dbrowser=${params.BROWSER}
-                            -DrecordVideo=${params.RECORD_VIDEO}
-                            -DvideoFolder=${VIDEO_FOLDER}
-                            -DscreenshotFolder=${SCREENSHOT_FOLDER}
-                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm"
+                            ${M2_HOME}/bin/mvn test -Dtest=runner.TestRunner \
+                            -DplatformName=${params.PLATFORM_NAME} \
+                            -Dbrowser=${params.BROWSER} \
+                            -DrecordVideo=${params.RECORD_VIDEO} \
+                            -DvideoFolder=${VIDEO_FOLDER} \
+                            -DscreenshotFolder=${SCREENSHOT_FOLDER} \
+                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn
                         """
-
-                        sh "${mvnCommand}"
+                        sh mvnCommand
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         archiveArtifacts artifacts: "${SCREENSHOT_FOLDER}/**/*.png", allowEmptyArchive: true
@@ -122,6 +119,7 @@ pipeline {
             steps {
                 script {
                     try {
+                        echo "📊 Génération des rapports..."
                         // Zip video files
                         sh """
                             if [ -d "${VIDEO_FOLDER}" ]; then
