@@ -1,3 +1,4 @@
+```groovy
 pipeline {
     agent any
 
@@ -36,12 +37,12 @@ pipeline {
 
         // Configuration du Test
         TEST_ENVIRONMENT = 'Production'
-
-        // Configuration OS-Spécifique
-        IS_MACOS = sh(script: 'uname -s', returnStdout: true).trim() == 'Darwin'
-        VIDEO_CAPTURE_DEVICE = IS_MACOS ? '1' : ':0.0'
-        PACKAGE_MANAGER = IS_MACOS ? 'brew' : 'apt-get'
     }
+
+    // Variables pour la détection du système d'exploitation
+    def IS_MACOS = false
+    def VIDEO_CAPTURE_DEVICE = ':0.0'
+    def PACKAGE_MANAGER = 'apt-get'
 
     parameters {
         choice(
@@ -75,6 +76,11 @@ pipeline {
         stage('Initialization') {
             steps {
                 script {
+                    // Détection du système d'exploitation
+                    IS_MACOS = sh(script: 'uname -s', returnStdout: true).trim() == 'Darwin'
+                    VIDEO_CAPTURE_DEVICE = IS_MACOS ? '1' : ':0.0'
+                    PACKAGE_MANAGER = IS_MACOS ? 'brew' : 'apt-get'
+
                     echo """╔═══════════════════════════════════════════╗
 ║         🚀 Démarrage des Tests             ║
 ╚═══════════════════════════════════════════╝"""
@@ -88,9 +94,9 @@ pipeline {
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
 
-                    // Configuration OS-spécifique pour la vidéo
+                    // Installation de FFmpeg selon l'OS
                     if (params.RECORD_VIDEO) {
-                        if (env.IS_MACOS) {
+                        if (IS_MACOS) {
                             sh """
                                 if ! command -v ffmpeg &> /dev/null; then
                                     echo "Installation de ffmpeg pour l'enregistrement vidéo..."
@@ -137,7 +143,7 @@ pipeline {
                         echo '🏗️ Compilation et exécution des tests...'
 
                         if (params.RECORD_VIDEO) {
-                            if (env.IS_MACOS) {
+                            if (IS_MACOS) {
                                 sh """
                                     ffmpeg -f avfoundation -i "1" -framerate ${VIDEO_FRAME_RATE} \
                                     -video_size ${SCREEN_RESOLUTION} \
@@ -156,6 +162,7 @@ pipeline {
                             }
                         }
 
+                        // Exécution des tests
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
                             -Dtest=runner.TestRunner \
@@ -190,95 +197,97 @@ pipeline {
                 }
             }
         }
+stage('Reports') {
+           steps {
+               script {
+                   try {
+                       echo '📊 Génération des rapports...'
 
-        stage('Reports') {
-            steps {
-                script {
-                    try {
-                        echo '📊 Génération des rapports...'
+                       if (params.RECORD_VIDEO) {
+                           sh """
+                               if [ -d "${VIDEO_DIR}" ]; then
+                                   mkdir -p ${ALLURE_RESULTS}/videos
+                                   cp ${VIDEO_DIR}/*.mp4 ${ALLURE_RESULTS}/videos/ || true
+                               fi
+                           """
+                       }
 
-                        if (params.RECORD_VIDEO) {
-                            sh """
-                                if [ -d "${VIDEO_DIR}" ]; then
-                                    mkdir -p ${ALLURE_RESULTS}/videos
-                                    cp ${VIDEO_DIR}/*.mp4 ${ALLURE_RESULTS}/videos/ || true
-                                fi
-                            """
-                        }
+                       // Rapport Allure
+                       allure([
+                           includeProperties: true,
+                           jdk: '',
+                           properties: [],
+                           reportBuildPolicy: 'ALWAYS',
+                           results: [[path: "${ALLURE_RESULTS}"]]
+                       ])
 
-                        allure([
-                            includeProperties: true,
-                            jdk: '',
-                            properties: [],
-                            reportBuildPolicy: 'ALWAYS',
-                            results: [[path: "${ALLURE_RESULTS}"]]
-                        ])
+                       // Rapport Cucumber
+                       cucumber(
+                           fileIncludePattern: '**/cucumber.json',
+                           jsonReportDirectory: 'target',
+                           reportTitle: '🌟 Planity Test Report',
+                           classifications: [
+                               [key: '🏢 Project', value: PROJECT_NAME],
+                               [key: '📌 Version', value: PROJECT_VERSION],
+                               [key: '🌿 Branch', value: params.BRANCH_NAME],
+                               [key: '📱 Platform', value: params.PLATFORM_NAME],
+                               [key: '🌐 Browser', value: params.BROWSER],
+                               [key: '🔄 Build', value: "#${BUILD_NUMBER}"],
+                               [key: '📅 Date', value: new Date().format('dd/MM/yyyy HH:mm')],
+                               [key: '⏱️ Duration', value: currentBuild.durationString],
+                               [key: '🌡️ Environment', value: TEST_ENVIRONMENT],
+                               [key: '📝 Language', value: 'FR'],
+                               [key: '☕ Java Version', value: sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()],
+                               [key: '📹 Video', value: params.RECORD_VIDEO ? 'Activé' : 'Désactivé']
+                           ]
+                       )
 
-                        cucumber(
-                            fileIncludePattern: '**/cucumber.json',
-                            jsonReportDirectory: 'target',
-                            reportTitle: '🌟 Planity Test Report',
-                            classifications: [
-                                [key: '🏢 Project', value: PROJECT_NAME],
-                                [key: '📌 Version', value: PROJECT_VERSION],
-                                [key: '🌿 Branch', value: params.BRANCH_NAME],
-                                [key: '📱 Platform', value: params.PLATFORM_NAME],
-                                [key: '🌐 Browser', value: params.BROWSER],
-                                [key: '🔄 Build', value: "#${BUILD_NUMBER}"],
-                                [key: '📅 Date', value: new Date().format('dd/MM/yyyy HH:mm')],
-                                [key: '⏱️ Duration', value: currentBuild.durationString],
-                                [key: '🌡️ Environment', value: TEST_ENVIRONMENT],
-                                [key: '📝 Language', value: 'FR'],
-                                [key: '☕ Java Version', value: sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()],
-                                [key: '📹 Video', value: params.RECORD_VIDEO ? 'Enabled' : 'Disabled']
-                            ]
-                        )
+                       // Archivage des artefacts
+                       sh """
+                           cd target
+                           zip -r test-results-${BUILD_NUMBER}.zip \
+                               allure-results/ \
+                               cucumber-reports/ \
+                               screenshots/ \
+                               videos/ \
+                               surefire-reports/ \
+                               cucumber.json \
+                               rapports-tests/
+                       """
 
-                        sh """
-                            cd target
-                            zip -r test-results-${BUILD_NUMBER}.zip \
-                                allure-results/ \
-                                cucumber-reports/ \
-                                screenshots/ \
-                                videos/ \
-                                surefire-reports/ \
-                                cucumber.json \
-                                rapports-tests/
-                        """
+                       archiveArtifacts(
+                           artifacts: """
+                               target/test-results-${BUILD_NUMBER}.zip,
+                               target/cucumber.json,
+                               target/surefire-reports/**/*,
+                               ${EXCEL_REPORTS}/**/*.xlsx,
+                               ${VIDEO_DIR}/**/*.mp4
+                           """,
+                           allowEmptyArchive: true
+                       )
 
-                        archiveArtifacts(
-                            artifacts: """
-                                target/test-results-${BUILD_NUMBER}.zip,
-                                target/cucumber.json,
-                                target/surefire-reports/**/*,
-                                ${EXCEL_REPORTS}/**/*.xlsx,
-                                ${VIDEO_DIR}/**/*.mp4
-                            """,
-                            allowEmptyArchive: true
-                        )
+                   } catch (Exception e) {
+                       currentBuild.result = 'UNSTABLE'
+                       echo "⚠️ Erreur de génération des rapports: ${e.message}"
+                   }
+               }
+           }
+       }
+   }
 
-                    } catch (Exception e) {
-                        currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Erreur de génération des rapports: ${e.message}"
-                    }
-                }
-            }
-        }
-    }
+   post {
+       always {
+           script {
+               def status = currentBuild.result ?: 'SUCCESS'
+               def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
+               def statusColor = status == 'SUCCESS' ? '\033[0;32m' : status == 'UNSTABLE' ? '\033[0;33m' : '\033[0;31m'
+               def resetColor = '\033[0m'
 
-    post {
-        always {
-            script {
-                def status = currentBuild.result ?: 'SUCCESS'
-                def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
-                def statusColor = status == 'SUCCESS' ? '\033[0;32m' : status == 'UNSTABLE' ? '\033[0;33m' : '\033[0;31m'
-                def resetColor = '\033[0m'
+               def totalFeatures = sh(script: 'find . -name "*.feature" | wc -l', returnStdout: true).trim()
+               def totalScenarios = sh(script: 'grep -r "Scenario:" features/ | wc -l', returnStdout: true).trim() ?: '0'
+               def successRate = status == 'SUCCESS' ? '100%' : status == 'UNSTABLE' ? '75%' : '0%'
 
-                def totalFeatures = sh(script: 'find . -name "*.feature" | wc -l', returnStdout: true).trim()
-                def totalScenarios = sh(script: 'grep -r "Scenario:" features/ | wc -l', returnStdout: true).trim() ?: '0'
-                def successRate = status == 'SUCCESS' ? '100%' : status == 'UNSTABLE' ? '75%' : '0%'
-
-                echo """╔════════════════════════════════════════════════╗
+               echo """╔════════════════════════════════════════════════╗
 ║           🌟 Rapport Final d'Exécution           ║
 ╚════════════════════════════════════════════════╝
 
@@ -299,11 +308,12 @@ pipeline {
 ▪️ 🌐 Browser: ${params.BROWSER}
 ▪️ 🎯 Suite: ${params.TEST_SUITE}
 ▪️ 🌡️ Env: ${TEST_ENVIRONMENT}
-▪️ 📹 Video: ${params.RECORD_VIDEO ? 'Enabled' : 'Disabled'}
+▪️ 📹 Video: ${params.RECORD_VIDEO ? 'Activé' : 'Désactivé'}
 
 ⚙️ Configuration Technique:
 ▪️ 🔨 Maven: ${sh(script: '${M2_HOME}/bin/mvn -version | head -n 1', returnStdout: true).trim()}
 ▪️ ☕ Java: ${sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()}
+▪️ 💻 OS: ${IS_MACOS ? 'MacOS' : 'Linux'}
 
 📊 Métriques des Tests:
 ▪️ Features: ${totalFeatures}
@@ -333,24 +343,24 @@ ${emoji} Statut Final: ${statusColor}${status}${resetColor}
 ▪️ 📊 Dashboard: ${BUILD_URL}allure
 """
 
-                sh """
-                    find . -type f -name "*.tmp" -delete || true
-                    find . -type d -name "node_modules" -exec rm -rf {} + || true
-                """
-            }
-        }
+               // Nettoyage
+               sh """
+                   find . -type f -name "*.tmp" -delete || true
+                   find . -type d -name "node_modules" -exec rm -rf {} + || true
+               """
+           }
+       }
 
-        success {
-            echo '✅ Pipeline terminé avec succès!'
-        }
+       success {
+           echo '✅ Pipeline terminé avec succès!'
+       }
 
-        failure {
-            echo '❌ Pipeline terminé en échec!'
-        }
+       failure {
+           echo '❌ Pipeline terminé en échec!'
+       }
 
-        cleanup {
-
-            deleteDir()
-        }
-    }
+       cleanup {
+           deleteDir()
+       }
+   }
 }
