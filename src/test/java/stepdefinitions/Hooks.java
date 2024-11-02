@@ -25,7 +25,7 @@ import java.util.Properties;
 
 public class Hooks {
     public static final String NOM_APK = "radio-france.apk";
-    public static final String URL_WEB = "https://www.radiofrance.fr/franceculture";
+    public static final String URL_WEB = "https://www.planity.com/";
     protected WebDriverWait attente;
     private TestManager infosTest;
     private static boolean isFirstTest = true;
@@ -130,8 +130,7 @@ public class Hooks {
         try {
             // Gérer les popups avec des tentatives multiples
             for (String xpath : new String[]{
-                    "//span[text()='Tout refuser']",
-                    "//span[text()='Tout accepter']"
+                    "//button[contains(.,'Accepter & Fermer')]"
             }) {
                 try {
                     WebElement element = attente.until(ExpectedConditions.elementToBeClickable(By.xpath(xpath)));

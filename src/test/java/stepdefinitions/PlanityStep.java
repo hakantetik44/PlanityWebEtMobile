@@ -1,48 +1,35 @@
 package stepdefinitions;
 
 import io.cucumber.java.Before;
-import io.cucumber.java.Scenario;
-import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
-import pages.RadioPage;
+import io.cucumber.java.en.Then;
+import io.cucumber.java.Scenario;
+import pages.PlanityPage;
 import utils.Driver;
 import utils.TestManager;
 
-import static org.junit.Assert.assertTrue;
-
-public class RadioStep {
-    private RadioPage pageRadio = new RadioPage();
+public class PlanityStep {
+    private PlanityPage planityPage = new PlanityPage();
     private TestManager testManager;
     private static String currentScenarioName;
 
-    public RadioStep() {
+    public PlanityStep() {
         testManager = TestManager.getInstance();
     }
 
-    @Before
-    public void setUp(Scenario scenario) {
-        currentScenarioName = scenario.getName();
-    }
+
 
     private void executeStep(String stepName, String expectedResult, Runnable action) {
         try {
-            // Step bilgilerini ayarla
             testManager.setNomScenario(currentScenarioName);
             testManager.setNomEtape(stepName);
             testManager.setResultatAttendu(expectedResult);
-
-            // Step'i çalıştır
             action.run();
-
-            // Başarılı sonuç
             testManager.setStatut("REUSSI");
-
-            // URL varsa kaydet
             String currentUrl = Driver.getCurrentDriver().getCurrentUrl();
             if (currentUrl != null) {
                 testManager.setUrl(currentUrl);
             }
-
         } catch (Exception e) {
             testManager.setStatut("ECHEC");
             testManager.setMessageErreur(e.getMessage());
@@ -52,59 +39,64 @@ public class RadioStep {
         }
     }
 
-    @Then("Je vérifie que je suis sur la page d'accueil")
-    public void verifierPageAccueil() {
+    @When("Je clique sur le lien {string} dans le menu")
+    public void jeCliqueSurLeLienDansLeMenu(String lien) {
         executeStep(
-                "Vérification de la page d'accueil",
-                "La page d'accueil doit être affichée",
+                "Clic sur le lien " + lien + " dans le menu",
+                "Le lien du menu doit être cliqué",
                 () -> {
-                    String urlAttendue = "https://www.radiofrance.fr";
-                    String urlReelle = Driver.getCurrentDriver().getCurrentUrl();
-                    assertTrue(urlReelle.startsWith(urlAttendue));
-                    testManager.setResultatReel("Page d'accueil vérifiée");
+                    planityPage.cliquerLienCoiffeur();
+                    testManager.setResultatReel("Clic effectué sur le lien " + lien);
+                }
+        );
+    }
+
+    @When("Je saisis {string} dans la recherche")
+    public void jeSaisisDansLaRecherche(String location) {
+        executeStep(
+                "Saisie de la localisation",
+                "Le champ de recherche doit être rempli",
+                () -> {
+                    planityPage.saisirLocalisation(location);
+                    testManager.setResultatReel("Localisation saisie: " + location);
                 }
         );
     }
 
     @When("Je clique sur le bouton {string}")
-    public void cliquerSurLeBouton(String nomBouton) {
+    public void jeCliqueSurLeBouton(String Rechercher) {
         executeStep(
-                "Clic sur " + nomBouton,
+                "Clic sur le bouton " + Rechercher,
                 "Le bouton doit être cliqué",
                 () -> {
-                    pageRadio.cliquerBtnRechercher();
-                    testManager.setResultatReel("Clic effectué sur " + nomBouton);
-                }
-        );
-    }
-
-    @When("Je saisis {string} dans le champ de recherche")
-    public void effectuerRecherche(String terme) {
-        executeStep(
-                "Saisie recherche",
-                "Saisir: " + terme,
-                () -> {
-                    pageRadio.effectuerRecherche(terme);
-                    testManager.setResultatReel("Recherche: " + terme);
-                }
-        );
-    }
-
-    @Then("Les résultats pour {string} doivent être affichés")
-    public void verifierResultatsRecherche(String terme) throws InterruptedException {
-        executeStep(
-                "Vérification résultats",
-                "Voir les résultats pour: " + terme,
-                () -> {
                     try {
-                        Thread.sleep(3000);
+                        Thread.sleep(2000);
+                        planityPage.cliquerBtnRechercher();
+                        testManager.setResultatReel("Clic effectué sur le bouton " + Rechercher);
                     } catch (InterruptedException e) {
                         throw new RuntimeException(e);
                     }
-                    String urlAttendue = "https://www.radiofrance.fr/recherche";
-                    String urlReelle = Driver.getCurrentDriver().getCurrentUrl();
-                    assertTrue(urlReelle.startsWith(urlAttendue));
-                    testManager.setResultatReel("Résultats vérifiés pour: " + terme);
+                }
+        );
+    }
+
+    @Then("Je devrais voir une liste de coiffeurs à Paris")
+    public void jeDevraisVoirUneListeDeCoiffeursAParis() {
+        executeStep(
+                "Vérification des résultats de recherche",
+                "La liste des coiffeurs doit être affichée",
+                () -> {
+                    boolean isDisplayed = planityPage.verifierResultatsCoiffeurs("Paris");
+                    if (!isDisplayed) {
+                        throw new AssertionError("La liste des coiffeurs n'est pas affichée");
+                    }
+                    testManager.setResultatReel("Liste des coiffeurs affichée avec succès");
+                    planityPage.cliquerLienCoiffeurParis();
+                    try {
+                        Thread.sleep(4000);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
         );
     }

@@ -14,18 +14,38 @@ public class PlanityPage extends BasePage {
         PageFactory.initElements(getCurrentDriver(), this);
     }
 
-    public void effectuerRecherche(String termeRecherche) {
-        By champRecherche = OS.isAndroid() ?
-                AppiumBy.androidUIAutomator("new UiSelector().text(\"Recherche\")") :
-                By.xpath("//input[@aria-label='Rechercher un podcast, un épisode, une personnalité...']");
-        sendKeys(champRecherche, termeRecherche);
+    public void cliquerLienCoiffeur() {
+        By coiffeurLink = OS.isAndroid() ?
+                AppiumBy.androidUIAutomator("new UiSelector().text(\"Coiffeur\")") :
+                By.xpath("//a[@id='nav-item-0'][@href='/coiffeur']");
+        click(coiffeurLink);
+    }
+
+    public void saisirLocalisation(String location) {
+        By locationInput = OS.isAndroid() ?
+                AppiumBy.androidUIAutomator("new UiSelector().text(\"Adresse, ville...\")") :
+                By.cssSelector("input#main-where-input_1730471228793");
+        sendKeys(locationInput, location);
     }
 
     public void cliquerBtnRechercher() {
-        By btnRechercher = OS.isAndroid() ?
-                AppiumBy.accessibilityId("Recherche") :
-                By.xpath("//span[normalize-space()='Rechercher']");
-        getCurrentDriver().findElement(btnRechercher).click();
+        By searchButton = OS.isAndroid() ?
+                AppiumBy.androidUIAutomator("new UiSelector().text(\"Recherche\")") :
+                By.xpath("//span[text()='Rechercher']");
+        click(searchButton);
     }
 
+    public void cliquerLienCoiffeurParis() {
+        By coiffeurLink = OS.isAndroid() ?
+                AppiumBy.androidUIAutomator("new UiSelector().text(\"Coiffeur\")") :
+                By.xpath("//a[@id='nav-item-0'][@href='/coiffeur']");
+        click(coiffeurLink);
+    }
+
+    public boolean verifierResultatsCoiffeurs(String ville) {
+        By resultTitle = OS.isAndroid() ?
+                AppiumBy.androidUIAutomator("new UiSelector().textContains(\"Coiffeurs à " + ville + "\")") :
+                By.cssSelector("h2#place-title-0-category-page");
+        return isDisplayed(resultTitle);
+    }
 }

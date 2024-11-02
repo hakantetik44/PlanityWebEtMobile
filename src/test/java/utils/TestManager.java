@@ -67,7 +67,7 @@ public class TestManager {
         STEP_SUGGESTIONS.put("page_accueil", Arrays.asList(
                 "Je clique sur le bouton \"Recherche\"",
                 "Je vérifie le menu principal",
-                "Je vérifie le logo Radio France"
+                "Je vérifie le logo Planity"
         ));
 
         STEP_SUGGESTIONS.put("recherche", Arrays.asList(
@@ -175,6 +175,103 @@ public class TestManager {
     }
 
     // Test adımı ekleme ve analiz
+    public void ajouterInfosTest(TestManager testInfo) {
+        if (testInfo == null) return;
+
+        boolean isDuplicate = rapportsTests.stream()
+                .anyMatch(existing -> isSameStep(existing, testInfo));
+
+        if (!isDuplicate) {
+            testEndTime = LocalDateTime.now();
+            testInfo.dateExecution = testEndTime;
+            rapportsTests.add(testInfo);
+            updateAnalysis(testInfo);
+            suggestNextSteps(testInfo);
+        }
+    }
+
+    private void createTestResultsSheet(Sheet sheet) {
+        CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
+        CellStyle successStyle = createSuccessStyle(sheet.getWorkbook());
+        CellStyle failureStyle = createFailureStyle(sheet.getWorkbook());
+
+        Row headerRow = sheet.createRow(0);
+        String[] columns = {
+                "Scénario", "Étape", "Statut", "Plateforme",
+                "Résultat Attendu", "Résultat Réel", "URL",
+                "Message d'Erreur", "Date d'Exécution", "Durée"
+        };
+
+        for (int i = 0; i < columns.length; i++) {
+            Cell cell = headerRow.createCell(i);
+            cell.setCellValue(columns[i]);
+            cell.setCellStyle(headerStyle);
+            sheet.setColumnWidth(i, 6000);
+        }
+
+        int rowNum = 1;
+        for (TestManager info : rapportsTests) {
+            Row row = sheet.createRow(rowNum++);
+
+            row.createCell(0).setCellValue(info.getNomScenario() != null ? info.getNomScenario() : "");
+            row.createCell(1).setCellValue(info.getNomEtape() != null ? info.getNomEtape() : "");
+
+            Cell statutCell = row.createCell(2);
+            statutCell.setCellValue(info.getStatut() != null ? info.getStatut() : "");
+
+            if ("REUSSI".equalsIgnoreCase(info.getStatut())) {
+                statutCell.setCellStyle(successStyle);
+            } else if ("ECHEC".equalsIgnoreCase(info.getStatut())) {
+                statutCell.setCellStyle(failureStyle);
+            }
+
+            row.createCell(3).setCellValue(info.getPlateforme() != null ? info.getPlateforme() : "");
+            row.createCell(4).setCellValue(info.getResultatAttendu() != null ? info.getResultatAttendu() : "");
+            row.createCell(5).setCellValue(info.getResultatReel() != null ? info.getResultatReel() : "");
+            row.createCell(6).setCellValue(info.getUrl() != null ? info.getUrl() : "");
+            row.createCell(7).setCellValue(info.getMessageErreur() != null ? info.getMessageErreur() : "");
+            row.createCell(8).setCellValue(
+                    info.dateExecution.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            );
+
+            // Toplam test süresini hesapla ve göster
+            long totalDurationSeconds = ChronoUnit.SECONDS.between(testStartTime, testEndTime);
+            row.createCell(9).setCellValue(totalDurationSeconds + " s");
+        }
+    }
+    private void createAnalysisSheet(Sheet sheet) {
+        CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
+        int rowNum = 0;
+
+        // Genel İstatistikler
+        Row titleRow = sheet.createRow(rowNum++);
+        Cell titleCell = titleCell = titleRow.createCell(0);
+        titleCell.setCellValue("Statistiques Générales");
+        titleCell.setCellStyle(headerStyle);
+
+        rowNum = addAnalysisSection(sheet, rowNum, "Taux de Réussite", analysisResults.get("success_rate"));
+        rowNum = addAnalysisSection(sheet, rowNum, "Étape la Plus Utilisée", analysisResults.get("most_used_step"));
+        rowNum = addAnalysisSection(sheet, rowNum, "Durée Totale", analysisResults.get("test_duration"));
+
+        rowNum++; // Boş satır
+
+        // Hata Analizi
+        if (analysisResults.containsKey("failure_analysis")) {
+            Row analysisTitle = sheet.createRow(rowNum++);
+            Cell analysisTitleCell = analysisTitle.createCell(0);
+            analysisTitleCell.setCellValue("Analyse des Échecs");
+            analysisTitleCell.setCellStyle(headerStyle);
+
+            String[] analysisLines = analysisResults.get("failure_analysis").split("\n");
+            for (String line : analysisLines) {
+                Row row = sheet.createRow(rowNum++);
+                row.createCell(0).setCellValue(line);
+            }
+        }
+
+        sheet.setColumnWidth(0, 15000);
+        sheet.setColumnWidth(1, 10000);
+    }
 
 
     // Dinamik test analizi
@@ -371,103 +468,6 @@ public class TestManager {
     }
 
     // Excel sayfalarını oluşturma metodları
-    public void ajouterInfosTest(TestManager testInfo) {
-        if (testInfo == null) return;
-
-        boolean isDuplicate = rapportsTests.stream()
-                .anyMatch(existing -> isSameStep(existing, testInfo));
-
-        if (!isDuplicate) {
-            testEndTime = LocalDateTime.now();
-            testInfo.dateExecution = testEndTime;
-            rapportsTests.add(testInfo);
-            updateAnalysis(testInfo);
-            suggestNextSteps(testInfo);
-        }
-    }
-
-    private void createTestResultsSheet(Sheet sheet) {
-        CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
-        CellStyle successStyle = createSuccessStyle(sheet.getWorkbook());
-        CellStyle failureStyle = createFailureStyle(sheet.getWorkbook());
-
-        Row headerRow = sheet.createRow(0);
-        String[] columns = {
-                "Scénario", "Étape", "Statut", "Plateforme",
-                "Résultat Attendu", "Résultat Réel", "URL",
-                "Message d'Erreur", "Date d'Exécution", "Durée"
-        };
-
-        for (int i = 0; i < columns.length; i++) {
-            Cell cell = headerRow.createCell(i);
-            cell.setCellValue(columns[i]);
-            cell.setCellStyle(headerStyle);
-            sheet.setColumnWidth(i, 6000);
-        }
-
-        int rowNum = 1;
-        for (TestManager info : rapportsTests) {
-            Row row = sheet.createRow(rowNum++);
-
-            row.createCell(0).setCellValue(info.getNomScenario() != null ? info.getNomScenario() : "");
-            row.createCell(1).setCellValue(info.getNomEtape() != null ? info.getNomEtape() : "");
-
-            Cell statutCell = row.createCell(2);
-            statutCell.setCellValue(info.getStatut() != null ? info.getStatut() : "");
-
-            if ("REUSSI".equalsIgnoreCase(info.getStatut())) {
-                statutCell.setCellStyle(successStyle);
-            } else if ("ECHEC".equalsIgnoreCase(info.getStatut())) {
-                statutCell.setCellStyle(failureStyle);
-            }
-
-            row.createCell(3).setCellValue(info.getPlateforme() != null ? info.getPlateforme() : "");
-            row.createCell(4).setCellValue(info.getResultatAttendu() != null ? info.getResultatAttendu() : "");
-            row.createCell(5).setCellValue(info.getResultatReel() != null ? info.getResultatReel() : "");
-            row.createCell(6).setCellValue(info.getUrl() != null ? info.getUrl() : "");
-            row.createCell(7).setCellValue(info.getMessageErreur() != null ? info.getMessageErreur() : "");
-            row.createCell(8).setCellValue(
-                    info.dateExecution.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-            );
-
-            // Toplam test süresini hesapla ve göster
-            long totalDurationSeconds = ChronoUnit.SECONDS.between(testStartTime, testEndTime);
-            row.createCell(9).setCellValue(totalDurationSeconds + " s");
-        }
-    }
-    private void createAnalysisSheet(Sheet sheet) {
-        CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());
-        int rowNum = 0;
-
-        // Genel İstatistikler
-        Row titleRow = sheet.createRow(rowNum++);
-        Cell titleCell = titleCell = titleRow.createCell(0);
-        titleCell.setCellValue("Statistiques Générales");
-        titleCell.setCellStyle(headerStyle);
-
-        rowNum = addAnalysisSection(sheet, rowNum, "Taux de Réussite", analysisResults.get("success_rate"));
-        rowNum = addAnalysisSection(sheet, rowNum, "Étape la Plus Utilisée", analysisResults.get("most_used_step"));
-        rowNum = addAnalysisSection(sheet, rowNum, "Durée Totale", analysisResults.get("test_duration"));
-
-        rowNum++; // Boş satır
-
-        // Hata Analizi
-        if (analysisResults.containsKey("failure_analysis")) {
-            Row analysisTitle = sheet.createRow(rowNum++);
-            Cell analysisTitleCell = analysisTitle.createCell(0);
-            analysisTitleCell.setCellValue("Analyse des Échecs");
-            analysisTitleCell.setCellStyle(headerStyle);
-
-            String[] analysisLines = analysisResults.get("failure_analysis").split("\n");
-            for (String line : analysisLines) {
-                Row row = sheet.createRow(rowNum++);
-                row.createCell(0).setCellValue(line);
-            }
-        }
-
-        sheet.setColumnWidth(0, 15000);
-        sheet.setColumnWidth(1, 10000);
-    }
 
     private void createSuggestionsSheet(Sheet sheet) {
         CellStyle headerStyle = createHeaderStyle(sheet.getWorkbook());

@@ -1,10 +1,8 @@
-Feature: Filtrer les coiffeurs
+Feature: Recherche de coiffeur
 
-  Scenario: Sélectionner des coiffeurs selon la disponibilité et le tri
+  Scenario: Rechercher un coiffeur via menu et recherche directe
     Given Je lance l'application
-    When Je recherche "Coiffeur" et je saisis "Paris"
-    And Je clique sur le bouton "Recherche"
+    When Je clique sur le lien "Coiffeur" dans le menu
+    And Je saisis "Paris" dans la recherche
+    And Je clique sur le bouton "Rechercher"
     Then Je devrais voir une liste de coiffeurs à Paris
-    When Je choisis une option dans la disponibilité
-    And Je sélectionne une option dans le tri
-    Then Je devrais voir les coiffeurs filtrés selon mes choix
