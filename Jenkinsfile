@@ -41,10 +41,14 @@ pipeline {
                     cleanWs()
                     checkout scm
 
-                    // Configuration dosyasını oku
-                    def configContent = readConfiguration()
-                    setupEnvironment(configContent)
-                    createDirectories()
+                    sh """
+                        mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS}
+                        mkdir -p target/screenshots
+                        chmod -R 777 ${VIDEO_DIR}
+                        export JAVA_HOME=${JAVA_HOME}
+                        java -version
+                        ${M2_HOME}/bin/mvn -version
+                    """
                 }
             }
         }
@@ -68,13 +72,37 @@ pipeline {
                 script {
                     try {
                         echo "🧪 Lancement des tests..."
-                        startVideoRecording()
-                        runTests()
+
+                        // Démarre l'enregistrement vidéo
+                        sh """
+                            ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
+                            -codec:v libx264 -r 30 -pix_fmt yuv420p \
+                            ${VIDEO_DIR}/test_execution_${BUILD_NUMBER}.mp4 \
+                            2>${EXCEL_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
+                        """
+
+                        // Exécute les tests
+                        sh """
+                            ${M2_HOME}/bin/mvn test \
+                            -Dtest=runner.TestRunner \
+                            -DplatformName=${params.PLATFORM_NAME} \
+                            -Dbrowser=${params.BROWSER} \
+                            -DvideoDir=${VIDEO_DIR} \
+                            -DscreenshotsDir=target/screenshots \
+                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
+                            -Dallure.results.directory=${ALLURE_RESULTS}
+                        """
+
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         throw e
                     } finally {
-                        stopVideoRecording()
+                        sh """
+                            if [ -f "${VIDEO_DIR}/recording.pid" ]; then
+                                kill \$(cat ${VIDEO_DIR}/recording.pid) || true
+                                rm ${VIDEO_DIR}/recording.pid
+                            fi
+                        """
                     }
                 }
             }
@@ -84,23 +112,45 @@ pipeline {
             steps {
                 script {
                     try {
-                        archiveTestResults()
-                        generateAllureReport()
-                        generateCucumberReport()
+                        // Crée les archives
+                        sh """
+                            cd target
+                            zip -r test-results-${BUILD_NUMBER}.zip \
+                                allure-results/ \
+                                cucumber-reports/ \
+                                screenshots/ \
+                                ${EXCEL_REPORTS}/videos/
+                        """
+
+                        // Génère les rapports
+                        allure([
+                            includeProperties: true,
+                            reportBuildPolicy: 'ALWAYS',
+                            results: [[path: "${ALLURE_RESULTS}"]]
+                        ])
+
+                        cucumber buildStatus: 'UNSTABLE',
+                            reportTitle: '🌟 Planity Test Automation Report',
+                            fileIncludePattern: '**/cucumber.json',
+                            trendsLimit: 10,
+                            classifications: [
+                                ['key': '🚀 Platform', 'value': params.PLATFORM_NAME],
+                                ['key': '🌐 Browser', 'value': params.BROWSER],
+                                ['key': '🎥 Video', 'value': 'Available']
+                            ]
+
+                        // Archive les artifacts
+                        archiveArtifacts artifacts: """
+                            ${EXCEL_REPORTS}/**/*.xlsx,
+                            ${VIDEO_DIR}/**/*.mp4,
+                            target/test-results-${BUILD_NUMBER}.zip,
+                            target/cucumber.json
+                        """, allowEmptyArchive: true
+
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
+                        echo "⚠️ Erreur rapports: ${e.message}"
                     }
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: """
-                        ${EXCEL_REPORTS}/**/*.xlsx,
-                        ${VIDEO_DIR}/**/*.mp4,
-                        target/allure-report.zip,
-                        target/cucumber-reports.zip,
-                        target/cucumber.json
-                    """, allowEmptyArchive: true
                 }
             }
         }
@@ -109,107 +159,10 @@ pipeline {
     post {
         always {
             script {
-                displayExecutionSummary()
-                cleanWorkspace()
-            }
-        }
-    }
-}
+                def status = currentBuild.result ?: 'SUCCESS'
+                def statusEmoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
 
-def readConfiguration() {
-    if (fileExists('src/test/resources/configuration.properties')) {
-        return sh(script: 'cat src/test/resources/configuration.properties', returnStdout: true).trim()
-    }
-    return ""
-}
-
-def setupEnvironment(configContent) {
-    env.PLATFORM_NAME = params.PLATFORM_NAME ?: 'Web'
-    env.BROWSER = env.PLATFORM_NAME == 'Web' ? params.BROWSER : ''
-
-    writeFile file: "${ALLURE_RESULTS}/environment.properties", text: """
-        Platform=${env.PLATFORM_NAME}
-        Browser=${env.BROWSER}
-        Test Framework=Cucumber
-        Language=FR
-    """.stripIndent()
-}
-
-def createDirectories() {
-    sh """
-        mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS}
-        mkdir -p target/screenshots
-        chmod -R 777 ${VIDEO_DIR}
-    """
-}
-
-def startVideoRecording() {
-    sh """
-        ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
-        -codec:v libx264 -r 30 -pix_fmt yuv420p \
-        ${VIDEO_DIR}/test_execution_${BUILD_NUMBER}.mp4 \
-        2>${EXCEL_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
-    """
-}
-
-def stopVideoRecording() {
-    sh """
-        if [ -f "${VIDEO_DIR}/recording.pid" ]; then
-            kill \$(cat ${VIDEO_DIR}/recording.pid) || true
-            rm ${VIDEO_DIR}/recording.pid
-        fi
-    """
-}
-
-def runTests() {
-    sh """
-        ${M2_HOME}/bin/mvn test \
-        -Dtest=runner.TestRunner \
-        -DplatformName=${params.PLATFORM_NAME} \
-        -Dbrowser=${params.BROWSER} \
-        -DvideoDir=${VIDEO_DIR} \
-        -DscreenshotsDir=target/screenshots \
-        -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-        -Dallure.results.directory=${ALLURE_RESULTS}
-    """
-}
-
-def archiveTestResults() {
-    sh """
-        cd target
-        zip -r test-results-${BUILD_NUMBER}.zip \
-            allure-results/ \
-            cucumber-reports/ \
-            screenshots/ \
-            ${EXCEL_REPORTS}/videos/
-    """
-}
-
-def generateAllureReport() {
-    allure([
-        includeProperties: true,
-        reportBuildPolicy: 'ALWAYS',
-        results: [[path: "${ALLURE_RESULTS}"]]
-    ])
-}
-
-def generateCucumberReport() {
-    cucumber buildStatus: 'UNSTABLE',
-        reportTitle: '🌟 Planity Test Automation Report',
-        fileIncludePattern: '**/cucumber.json',
-        trendsLimit: 10,
-        classifications: [
-            ['key': '🚀 Platform', 'value': params.PLATFORM_NAME],
-            ['key': '🌐 Browser', 'value': params.BROWSER],
-            ['key': '🎥 Video', 'value': 'Available']
-        ]
-}
-
-def displayExecutionSummary() {
-    def status = currentBuild.result ?: 'SUCCESS'
-    def statusEmoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
-
-    echo """╔═══════════════════════════════════════════╗
+                echo """╔═══════════════════════════════════════════╗
 ║             Résumé d'Exécution              ║
 ╚═══════════════════════════════════════════╝
 
@@ -226,11 +179,13 @@ def displayExecutionSummary() {
 
 ${statusEmoji} Statut Final: ${status}
 """
-}
 
-def cleanWorkspace() {
-    sh """
-        find . -type f -name '*.tmp' -delete
-        find . -type f -name '*.log' -mtime +7 -delete
-    """
+                // Nettoie l'espace de travail
+                sh """
+                    find . -type f -name '*.tmp' -delete
+                    find . -type f -name '*.log' -mtime +7 -delete
+                """
+            }
+        }
+    }
 }
