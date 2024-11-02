@@ -106,11 +106,11 @@ pipeline {
                         cucumber(
                             fileIncludePattern: '**/cucumber.json',
                             jsonReportDirectory: 'target',
-                            reportTitle: 'Planity Test Report',
+                            reportTitle: '🌟 Planity Test Report',
                             classifications: [
-                                [key: 'Branch', value: params.BRANCH_NAME],
-                                [key: 'Platform', value: params.PLATFORM_NAME],
-                                [key: 'Browser', value: params.BROWSER]
+                                [key: '🌿 Branch', value: params.BRANCH_NAME],
+                                [key: '📱 Platform', value: params.PLATFORM_NAME],
+                                [key: '🌐 Browser', value: params.BROWSER]
                             ]
                         )
 
@@ -171,8 +171,8 @@ pipeline {
 🔹 Artifacts: ${BUILD_URL}artifact/
 
 📝 Test Results:
-- Nombre de fichiers de test: ${testCount}
-- Résultat final: ${status}
+- 📁 Nombre de fichiers de test: ${testCount}
+- ✅ Résultat final: ${status}
 
 ${emoji} Statut Final: ${status}
 
