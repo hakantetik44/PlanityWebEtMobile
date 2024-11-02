@@ -129,7 +129,6 @@ pipeline {
                             reportTitle: '🌟 Planity Test Report',
                             classifications: [
                                 [key: '🏢 Project', value: PROJECT_NAME],
-                                [key: '📌 Version', value: PROJECT_VERSION],
                                 [key: '🌿 Branch', value: params.BRANCH_NAME],
                                 [key: '📱 Platform', value: params.PLATFORM_NAME],
                                 [key: '🌐 Browser', value: params.BROWSER],
