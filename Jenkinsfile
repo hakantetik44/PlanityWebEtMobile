@@ -17,6 +17,7 @@ pipeline {
         ALLURE_RESULTS = 'target/allure-results'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         CUCUMBER_JSON_PATH = 'target/cucumber.json'
+        EXCEL_REPORTS = 'target/rapports-tests'  // Added Excel reports directory
     }
 
     parameters {
@@ -41,7 +42,7 @@ pipeline {
         stage('Initialization') {
             steps {
                 script {
-                    // Temizlik
+                    // Cleanup
                     cleanWs()
 
                     // Git checkout
@@ -52,10 +53,11 @@ pipeline {
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
 
-                    // Klasör yapısı
+                    // Directory structure
                     sh """
                         mkdir -p ${ALLURE_RESULTS}
                         mkdir -p ${CUCUMBER_REPORTS}
+                        mkdir -p ${EXCEL_REPORTS}
                         mkdir -p target/screenshots
                         touch ${CUCUMBER_JSON_PATH}
                     """
@@ -67,7 +69,7 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Maven komutunu çalıştır
+                        // Run Maven command
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
                             -Dtest=runner.TestRunner \
@@ -114,7 +116,7 @@ pipeline {
                             ]
                         )
 
-                        // Arşivleme
+                        // Archive results
                         sh """
                             cd target
                             zip -r test-results-${BUILD_NUMBER}.zip \
@@ -122,14 +124,16 @@ pipeline {
                                 cucumber-reports/ \
                                 screenshots/ \
                                 surefire-reports/ \
-                                cucumber.json
+                                cucumber.json \
+                                rapports-tests/
                         """
 
                         archiveArtifacts(
                             artifacts: """
                                 target/test-results-${BUILD_NUMBER}.zip,
                                 target/cucumber.json,
-                                target/surefire-reports/**/*
+                                target/surefire-reports/**/*,
+                                ${EXCEL_REPORTS}/**/*.xlsx
                             """,
                             allowEmptyArchive: true
                         )
@@ -149,11 +153,11 @@ pipeline {
                 def status = currentBuild.result ?: 'SUCCESS'
                 def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
 
-                // Test sonuçlarını kontrol et
+                // Check test results
                 def testResults = sh(script: 'ls -1 target/surefire-reports/*.xml 2>/dev/null | wc -l', returnStdout: true).trim()
                 def testCount = testResults.toInteger()
 
-                // Rapor detayları
+                // Report details
                 echo """╔═══════════════════════════════════════════╗
 ║              🌟 Résumé d'Exécution          ║
 ╚═══════════════════════════════════════════╝
@@ -168,6 +172,7 @@ pipeline {
 📊 Rapports:
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
+🔹 Excel:     ${BUILD_URL}artifact/${EXCEL_REPORTS}/
 🔹 Artifacts: ${BUILD_URL}artifact/
 
 📝 Test Results:
@@ -179,7 +184,7 @@ ${emoji} Statut Final: ${status}
 🎉 Rapport Başlığı: 🌟 Planity Test Report
 
 📈 **Feature Statistics**
-Les graphiques suivants montrent les statistiques de passage et d’échec des fonctionnalités.
+Les graphiques suivants montrent les statistiques de passage et d'échec des fonctionnalités.
 """
 
                 // Cleanup
