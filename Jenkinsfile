@@ -153,14 +153,15 @@ pipeline {
                 def testResults = sh(script: 'ls -1 target/surefire-reports/*.xml 2>/dev/null | wc -l', returnStdout: true).trim()
                 def testCount = testResults.toInteger()
 
+                // Rapor detayları
                 echo """╔═══════════════════════════════════════════╗
 ║              🌟 Résumé d'Exécution          ║
 ╚═══════════════════════════════════════════╝
 
 🔄 Build: #${BUILD_NUMBER}
 🌿 Branch: ${params.BRANCH_NAME}
-📱 Plateforme: ${params.PLATFORM_NAME}
-🌐 Navigateur: ${params.BROWSER}
+📱 Platform: ${params.PLATFORM_NAME}
+🌐 Browser: ${params.BROWSER}
 📅 Date: ${new Date().format('dd/MM/yyyy HH:mm')}
 🔗 Jenkins URL: ${env.BUILD_URL}
 
@@ -174,6 +175,11 @@ pipeline {
 - Résultat final: ${status}
 
 ${emoji} Statut Final: ${status}
+
+🎉 Rapport Başlığı: 🌟 Planity Test Report
+
+📈 **Feature Statistics**
+Les graphiques suivants montrent les statistiques de passage et d’échec des fonctionnalités.
 """
 
                 // Cleanup
