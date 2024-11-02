@@ -7,19 +7,17 @@ pipeline {
         allure 'Allure'
     }
 
-   environment {
-           JAVA_HOME = "/usr/local/opt/openjdk@17"
-           M2_HOME = tool 'maven'
-           PATH = "${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}"
-           MAVEN_OPTS = '-Xmx3072m'
-           PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
-           TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
-           WORKSPACE_DIR = pwd()
-           ALLURE_RESULTS = 'target/allure-results'
-           CUCUMBER_REPORTS = 'target/cucumber-reports'
-           CUCUMBER_JSON = "${WORKSPACE_DIR}/target/cucumber.json"
-           CUCUMBER_PUBLISH_ENABLED = 'true'
-       }
+    environment {
+        JAVA_HOME = "/usr/local/opt/openjdk@17"
+        M2_HOME = tool 'maven'
+        PATH = "${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}"
+        MAVEN_OPTS = '-Xmx3072m'
+        PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
+        TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
+        ALLURE_RESULTS = 'target/allure-results'
+        CUCUMBER_REPORTS = 'target/cucumber-reports'
+        CUCUMBER_JSON_PATH = 'target/cucumber.json'
+    }
 
     parameters {
         choice(
@@ -39,133 +37,162 @@ pipeline {
         )
     }
 
-   stages {
-           stage('Initialization') {
-               steps {
-                   script {
-                       cleanWs()
-                       checkout scm
+    stages {
+        stage('Initialization') {
+            steps {
+                script {
+                    // Temizlik
+                    cleanWs()
 
-                       sh """
-                           mkdir -p ${ALLURE_RESULTS}
-                           mkdir -p ${CUCUMBER_REPORTS}
-                           mkdir -p target/screenshots
-                           echo '[]' > target/cucumber.json
-                           chmod 777 target/cucumber.json
-                       """
-                   }
-               }
-           }
+                    // Git checkout
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "*/${params.BRANCH_NAME}"]],
+                        extensions: [[$class: 'CleanBeforeCheckout']],
+                        userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
+                    ])
 
-           stage('Build & Test') {
-               steps {
-                   script {
-                       try {
-                           sh """
-                               ${M2_HOME}/bin/mvn clean test \
-                               -Dtest=runner.TestRunner \
-                               -DplatformName=${params.PLATFORM_NAME} \
-                               -Dbrowser=${params.BROWSER} \
-                               -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS}" \
-                               -Dallure.results.directory=${ALLURE_RESULTS}
-                           """
+                    // Klasör yapısı
+                    sh """
+                        mkdir -p ${ALLURE_RESULTS}
+                        mkdir -p ${CUCUMBER_REPORTS}
+                        mkdir -p target/screenshots
+                        touch ${CUCUMBER_JSON_PATH}
+                    """
+                }
+            }
+        }
 
-                           // JSON dosyasını kontrol et
-                           if (!fileExists('target/cucumber.json')) {
-                               error "Cucumber JSON dosyası oluşturulamadı"
-                           }
+        stage('Build & Test') {
+            steps {
+                script {
+                    try {
+                        // Maven komutunu çalıştır
+                        sh """
+                            ${M2_HOME}/bin/mvn clean test \
+                            -Dtest=runner.TestRunner \
+                            -DplatformName=${params.PLATFORM_NAME} \
+                            -Dbrowser=${params.BROWSER} \
+                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS}" \
+                            -Dallure.results.directory=${ALLURE_RESULTS}
+                        """
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        error "Test execution failed: ${e.message}"
+                    }
+                }
+            }
+            post {
+                always {
+                    junit testResults: '**/target/surefire-reports/*.xml', allowEmptyResults: true
+                }
+            }
+        }
 
-                           // JSON içeriğini kontrol et
-                           def jsonContent = readFile('target/cucumber.json').trim()
-                           if (jsonContent.isEmpty()) {
-                               error "Cucumber JSON dosyası boş"
-                           }
-                       } catch (Exception e) {
-                           currentBuild.result = 'FAILURE'
-                           error "Test execution failed: ${e.message}"
-                       }
-                   }
-               }
-               post {
-                   always {
-                       junit '**/target/surefire-reports/*.xml'
-                   }
-               }
-           }
+        stage('Reports') {
+            steps {
+                script {
+                    try {
+                        // Allure Report
+                        allure([
+                            includeProperties: true,
+                            jdk: '',
+                            properties: [],
+                            reportBuildPolicy: 'ALWAYS',
+                            results: [[path: "${ALLURE_RESULTS}"]]
+                        ])
 
-           stage('Reports') {
-               steps {
-                   script {
-                       try {
-                           // Allure Report
-                           allure([
-                               includeProperties: true,
-                               reportBuildPolicy: 'ALWAYS',
-                               results: [[path: "${ALLURE_RESULTS}"]]
-                           ])
+                        // Cucumber Report
+                        cucumber(
+                            fileIncludePattern: '**/cucumber.json',
+                            jsonReportDirectory: 'target',
+                            reportTitle: 'Planity Test Report',
+                            classifications: [
+                                [key: 'Branch', value: params.BRANCH_NAME],
+                                [key: 'Platform', value: params.PLATFORM_NAME],
+                                [key: 'Browser', value: params.BROWSER]
+                            ]
+                        )
 
-                           // JSON dosyası kontrolü
-                           def jsonFile = new File("${WORKSPACE}/target/cucumber.json")
-                           if (jsonFile.exists() && jsonFile.length() > 0) {
-                               // Cucumber Report
-                               cucumber([
-                                   fileIncludePattern: "target/cucumber.json",
-                                   jsonReportDirectory: "${WORKSPACE}/target",
-                                   reportTitle: '🌟 Planity Test Report',
-                                   buildStatus: 'UNSTABLE',
-                                   classifications: [
-                                       [key: '🌿 Branch', value: params.BRANCH_NAME],
-                                       [key: '📱 Platform', value: params.PLATFORM_NAME],
-                                       [key: '🌐 Browser', value: params.BROWSER],
-                                       [key: '📅 Date', value: new Date().format('dd/MM/yyyy HH:mm')]
-                                   ]
-                               ])
-                           } else {
-                               error "Valid cucumber.json file not found"
-                           }
+                        // Arşivleme
+                        sh """
+                            cd target
+                            zip -r test-results-${BUILD_NUMBER}.zip \
+                                allure-results/ \
+                                cucumber-reports/ \
+                                screenshots/ \
+                                surefire-reports/ \
+                                cucumber.json
+                        """
 
-                           // Archive
-                           archiveArtifacts(
-                               artifacts: """
-                                   target/cucumber.json,
-                                   target/surefire-reports/**/*,
-                                   target/screenshots/**/*
-                               """,
-                               allowEmptyArchive: true
-                           )
-                       } catch (Exception e) {
-                           echo "⚠️ Report generation warning: ${e.message}"
-                           currentBuild.result = 'UNSTABLE'
-                       }
-                   }
-               }
-           }
-       }
+                        archiveArtifacts(
+                            artifacts: """
+                                target/test-results-${BUILD_NUMBER}.zip,
+                                target/cucumber.json,
+                                target/surefire-reports/**/*
+                            """,
+                            allowEmptyArchive: true
+                        )
 
-       post {
-           always {
-               script {
-                   def status = currentBuild.result ?: 'SUCCESS'
-                   def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
+                    } catch (Exception e) {
+                        currentBuild.result = 'UNSTABLE'
+                        echo "⚠️ Report generation error: ${e.message}"
+                    }
+                }
+            }
+        }
+    }
 
-                   echo """╔═══════════════════════════════════════════╗
-   ║             Résumé d'Exécution              ║
-   ╚═══════════════════════════════════════════╝
+    post {
+        always {
+            script {
+                def status = currentBuild.result ?: 'SUCCESS'
+                def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
 
-   🎯 Build: #${BUILD_NUMBER}
-   🌿 Branch: ${params.BRANCH_NAME}
-   🕒 Durée: ${currentBuild.durationString}
-   📱 Platform: ${params.PLATFORM_NAME}
-   🌐 Browser: ${params.BROWSER}
+                // Test sonuçlarını kontrol et
+                def testResults = sh(script: 'ls -1 target/surefire-reports/*.xml 2>/dev/null | wc -l', returnStdout: true).trim()
+                def testCount = testResults.toInteger()
 
-   📊 Rapports:
-   🔹 Allure:    ${BUILD_URL}allure/
-   🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
-   🔹 Artifacts: ${BUILD_URL}artifact/
+                echo """╔═══════════════════════════════════════════╗
+║             Résumé d'Exécution              ║
+╚═══════════════════════════════════════════╝
 
-   ${emoji} Status Final: ${status}"""
-               }
-               cleanWs()
-           }
-       }
-   }}
+🎯 Build: #${BUILD_NUMBER}
+🌿 Branch: ${params.BRANCH_NAME}
+🕒 Durée: ${currentBuild.durationString}
+📱 Plateforme: ${params.PLATFORM_NAME}
+🌐 Navigateur: ${params.BROWSER}
+
+📊 Rapports:
+🔹 Allure:    ${BUILD_URL}allure/
+🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
+🔹 Artifacts: ${BUILD_URL}artifact/
+
+📝 Test Results:
+- Nombre de fichiers de test: ${testCount}
+- Résultat final: ${status}
+
+${emoji} Statut Final: ${status}
+"""
+
+                // Cleanup
+                sh """
+                    find . -type f -name "*.tmp" -delete || true
+                    find . -type d -name "node_modules" -exec rm -rf {} + || true
+                """
+            }
+        }
+
+        success {
+            echo '✅ Pipeline completed successfully!'
+        }
+
+        failure {
+            echo '❌ Pipeline failed!'
+        }
+
+        cleanup {
+            deleteDir()
+        }
+    }
+}
