@@ -1,9 +1,7 @@
 package stepdefinitions;
 
-import io.cucumber.java.Before;
 import io.cucumber.java.en.When;
 import io.cucumber.java.en.Then;
-import io.cucumber.java.Scenario;
 import pages.PlanityPage;
 import utils.Driver;
 import utils.TestManager;
@@ -16,8 +14,6 @@ public class PlanityStep {
     public PlanityStep() {
         testManager = TestManager.getInstance();
     }
-
-
 
     private void executeStep(String stepName, String expectedResult, Runnable action) {
         try {
