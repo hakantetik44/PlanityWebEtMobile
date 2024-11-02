@@ -18,10 +18,7 @@ pipeline {
         ALLURE_RESULTS = 'target/allure-results'
         EXCEL_REPORTS = 'target/rapports-tests'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
-        VIDEO_FOLDER = 'target/videos'
-        PERFORMANCE_REPORTS = 'target/performance'
         TEST_LOGS = 'target/test-logs'
-        AI_WORKSPACE = 'target/ai-workspace'
     }
 
     parameters {
@@ -36,19 +33,9 @@ pipeline {
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
         booleanParam(
-            name: 'GENERATE_AI_TESTS',
-            defaultValue: false,
-            description: 'Activer la génération de tests par IA'
-        )
-        booleanParam(
             name: 'RECORD_VIDEO',
             defaultValue: true,
             description: 'Activer l\'enregistrement vidéo'
-        )
-        string(
-            name: 'TEST_DESCRIPTION',
-            defaultValue: '',
-            description: 'Description pour la génération de tests IA'
         )
     }
 
@@ -60,59 +47,43 @@ pipeline {
                     cleanWs()
                     checkout scm
 
-                    // Create required directories
-                    sh """
-                        mkdir -p ${ALLURE_RESULTS} ${EXCEL_REPORTS} ${VIDEO_FOLDER}
-                        mkdir -p ${TEST_LOGS} ${AI_WORKSPACE}
-                        mkdir -p target/screenshots
-                    """
+                    if (fileExists('src/test/resources/configuration.properties')) {
+                        def configContent = sh(
+                            script: 'cat src/test/resources/configuration.properties',
+                            returnStdout: true
+                        ).trim()
 
-                    // Write environment properties
-                    writeFile file: "${ALLURE_RESULTS}/environment.properties", text: """
-                        Platform=${params.PLATFORM_NAME}
-                        Browser=${params.BROWSER}
-                        Test Framework=Cucumber
-                        Language=FR
-                        AI_Enabled=${params.GENERATE_AI_TESTS}
-                    """
-                }
-            }
-        }
-
-        stage('AI Test Generation') {
-            when {
-                expression { params.GENERATE_AI_TESTS == true }
-            }
-            steps {
-                script {
-                    try {
-                        echo "🤖 Génération de tests avec l'IA..."
-
-                        // Load OpenAI credentials
-                        withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
-                            // Initialize TestGenerator
-                            def testGenerator = load "src/test/java/utils/TestGenerator.groovy"
-                            testGenerator.init(OPENAI_API_KEY)
-
-                            // Generate test scenarios
-                            if (params.TEST_DESCRIPTION) {
-                                testGenerator.generateFeatureFileWithAI(params.TEST_DESCRIPTION)
+                        def props = configContent.split('\n').collectEntries { line ->
+                            def parts = line.split('=')
+                            if (parts.size() == 2) {
+                                [(parts[0].trim()): parts[1].trim()]
+                            } else {
+                                [:]
                             }
-
-                            // Analyze and report
-                            testGenerator.analyzeTestHistory()
-
-                            // Archive AI workspace
-                            dir(AI_WORKSPACE) {
-                                writeFile file: 'ai-metrics.json', text: readFile('target/test-metrics.json')
-                                writeFile file: 'ai-history.json', text: readFile('target/test-history.json')
-                            }
-                            archiveArtifacts artifacts: "${AI_WORKSPACE}/**/*"
                         }
-                    } catch (Exception e) {
-                        echo "⚠️ Erreur lors de la génération IA: ${e.message}"
-                        currentBuild.result = 'UNSTABLE'
+
+                        env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
+                        env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
+
+                        writeFile file: 'target/allure-results/environment.properties', text: """
+                            Platform=${env.PLATFORM_NAME}
+                            Browser=${env.BROWSER}
+                            Test Framework=Cucumber
+                            Language=FR
+                        """.stripIndent()
                     }
+
+                    echo """Configuration:
+                    • Plateforme: ${env.PLATFORM_NAME}
+                    • Navigateur: ${env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'}"""
+
+                    sh """
+                        mkdir -p ${EXCEL_REPORTS}/videos ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${TEST_LOGS}
+                        mkdir -p target/screenshots
+                        export JAVA_HOME=${JAVA_HOME}
+                        java -version
+                        ${M2_HOME}/bin/mvn -version
+                    """
                 }
             }
         }
@@ -122,10 +93,10 @@ pipeline {
                 script {
                     try {
                         echo "📦 Installation des dépendances..."
-                        sh "${M2_HOME}/bin/mvn clean install -DskipTests"
+                        sh "${M2_HOME}/bin/mvn clean install -DskipTests -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn"
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
-                        error "Échec de la construction: ${e.message}"
+                        throw e
                     }
                 }
             }
@@ -137,28 +108,29 @@ pipeline {
                     try {
                         echo "🧪 Lancement des tests..."
 
-                        // Start video recording if enabled
                         if (params.RECORD_VIDEO) {
                             sh """
+                                # Démarrer l'enregistrement vidéo
                                 ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
-                                -codec:v libx264 -r 30 ${VIDEO_FOLDER}/test-execution-${TIMESTAMP}.mp4 \
+                                -codec:v libx264 -r 30 \
+                                ${EXCEL_REPORTS}/videos/test-execution-${TIMESTAMP}.mp4 \
                                 2>${TEST_LOGS}/video.log &
                                 echo \$! > .recording.pid
                             """
                         }
 
-                        // Execute tests
                         sh """
                             ${M2_HOME}/bin/mvn test \
                             -Dtest=runner.TestRunner \
                             -DplatformName=${params.PLATFORM_NAME} \
                             -Dbrowser=${params.BROWSER} \
                             -DrecordVideo=${params.RECORD_VIDEO} \
-                            -DvideoFolder=${VIDEO_FOLDER} \
+                            -DvideoFolder=${EXCEL_REPORTS}/videos \
                             -DscreenshotFolder=target/screenshots \
                             -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-                            -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn
+                            -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn
                         """
+
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
                         echo "⚠️ Erreur pendant l'exécution des tests: ${e.message}"
@@ -175,6 +147,22 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Create archives
+                        sh """
+                            cd target
+
+                            # Créer l'archive des résultats de test avec les vidéos
+                            zip -r test-results-${TIMESTAMP}.zip \
+                                allure-results/ \
+                                cucumber-reports/ \
+                                screenshots/ \
+                                test-logs/
+
+                            # Créer une archive séparée pour les vidéos
+                            cd ${EXCEL_REPORTS}
+                            zip -r test-videos-${TIMESTAMP}.zip videos/
+                        """
+
                         // Allure Report
                         allure([
                             includeProperties: true,
@@ -190,27 +178,18 @@ pipeline {
                             classifications: [
                                 ['key': 'Platform', 'value': params.PLATFORM_NAME],
                                 ['key': 'Browser', 'value': params.BROWSER],
-                                ['key': 'AI Tests', 'value': params.GENERATE_AI_TESTS ? 'Yes' : 'No']
+                                ['key': 'Video Recording', 'value': params.RECORD_VIDEO ? 'Enabled' : 'Disabled']
                             ]
 
-                        // Archive test artifacts
-                        sh """
-                            cd target
-                            zip -r test-results-${TIMESTAMP}.zip \
-                                allure-results/ \
-                                cucumber-reports/ \
-                                screenshots/ \
-                                videos/ \
-                                test-logs/ \
-                                ${params.GENERATE_AI_TESTS ? 'ai-workspace/' : ''}
-                        """
-
+                        // Archive all artifacts
                         archiveArtifacts artifacts: """
-                            target/test-results-${TIMESTAMP}.zip,
-                            ${VIDEO_FOLDER}/**/*.mp4,
-                            target/screenshots/**/*.png,
                             ${EXCEL_REPORTS}/**/*.xlsx,
-                            ${TEST_LOGS}/**/*
+                            ${EXCEL_REPORTS}/videos/**/*.mp4,
+                            ${EXCEL_REPORTS}/test-videos-${TIMESTAMP}.zip,
+                            target/allure-report.zip,
+                            target/cucumber-reports.zip,
+                            target/cucumber.json,
+                            target/test-results-${TIMESTAMP}.zip
                         """, allowEmptyArchive: true
 
                     } catch (Exception e) {
@@ -236,25 +215,40 @@ pipeline {
 ⏱️ Durée: ${duration}
 📱 Plateforme: ${params.PLATFORM_NAME}
 🌐 Navigateur: ${params.BROWSER}
-🤖 Tests IA: ${params.GENERATE_AI_TESTS ? 'Activé' : 'Désactivé'}
+🎥 Enregistrement Vidéo: ${params.RECORD_VIDEO ? 'Activé' : 'Désactivé'}
 
 📊 Rapports:
 • Allure: ${BUILD_URL}allure/
 • Cucumber: ${BUILD_URL}cucumber-html-reports/overview-features.html
-• Vidéos: ${BUILD_URL}artifact/${VIDEO_FOLDER}/
-• Logs: ${BUILD_URL}artifact/${TEST_LOGS}/
+• Vidéos: ${BUILD_URL}artifact/${EXCEL_REPORTS}/videos/
+• Excel: ${BUILD_URL}artifact/${EXCEL_REPORTS}/
 
 ${status == 'SUCCESS' ? '✅ SUCCÈS' : status == 'UNSTABLE' ? '⚠️ INSTABLE' : '❌ ÉCHEC'}"""
 
-                // Cleanup workspace
-                cleanWs(
-                    deleteDirs: true,
-                    patterns: [
-                        [pattern: 'target/classes/', type: 'INCLUDE'],
-                        [pattern: 'target/test-classes/', type: 'INCLUDE']
-                    ]
-                )
+                // Cleanup workspace but keep reports
+                sh """
+                    if [ -d "target" ]; then
+                        find target -type f ! -name '*.zip' ! -name '*.xlsx' ! -name '*.json' ! -name '*.mp4' ! -name '*.png' -delete
+                    fi
+                """
             }
+        }
+
+        failure {
+            script {
+                echo "❌ Des échecs ont été détectés. Consultez les rapports pour plus de détails."
+            }
+        }
+
+        cleanup {
+            cleanWs(
+                deleteDirs: true,
+                patterns: [
+                    [pattern: 'target/classes/', type: 'INCLUDE'],
+                    [pattern: 'target/test-classes/', type: 'INCLUDE'],
+                    [pattern: '**/.git/', type: 'INCLUDE']
+                ]
+            )
         }
     }
 }
