@@ -141,15 +141,23 @@ stages {
                         node -v
                         npm -v
                     """
+if (params.PLATFORM_NAME == 'Web') {
+    sh '''
+        docker ps -a | grep 'selenium' | awk '{print $1}' | xargs -r docker rm -f
+    '''
+}
 
-                    // Configuration Docker pour Selenium Grid
-                    if (params.PLATFORM_NAME == 'Web') {
-                        docker.image('selenium/hub:latest').withRun('-p 4444:4444 --name selenium-hub') {
-                            docker.image("selenium/node-${params.BROWSER}:latest").withRun('--link selenium-hub:hub') {
-                                echo "🐳 Configuration Selenium Grid avec ${params.BROWSER}"
-                            }
-                        }
-                    }
+// Video kaydı başlatma kısmında:
+if (params.ENABLE_VIDEO) {
+    sh '''
+        ffmpeg -f avfoundation -i "1" -framerate ${VIDEO_FRAME_RATE} \
+        -video_size ${SCREEN_RESOLUTION} \
+        -vcodec libx264 -pix_fmt yuv420p \
+        "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
+        echo $! > video-pid
+    '''
+}
+
 
                     // Préparation des répertoires
                     sh """
@@ -528,13 +536,13 @@ EOF
 }
 
 def generateMetrics() {
-    def metrics = sh(script: """
-        echo "- Total Features: \$(find . -name "*.feature" | wc -l)"
-        echo "- Total Scénarios: \$(grep -r "Scenario:" features/ | wc -l)"
-        echo "- Tests Réussis: \$(grep -r "status=PASSED" target/surefire-reports | wc -l)"
-        echo "- Tests Échoués: \$(grep -r "status=FAILED" target/surefire-reports | wc -l)"
-        echo "- Durée Moyenne: \$(awk '{ total += \$1; count++ } END { print total/count }' target/surefire-reports/*.txt)"
-    """, returnStdout: true).trim()
+    def metrics = sh(script: '''
+        echo "- Total Features: $(find . -name "*.feature" | wc -l)"
+        echo "- Total Scénarios: $(grep -r "Scenario:" features/ | wc -l)"
+        echo "- Tests Réussis: $(grep -r "status=PASSED" target/surefire-reports | wc -l)"
+        echo "- Tests Échoués: $(grep -r "status=FAILED" target/surefire-reports | wc -l)"
+        echo "- Durée Moyenne: $(awk '{ total += $1; count++ } END { print total/count }' target/surefire-reports/*.txt)"
+    ''', returnStdout: true).trim()
 
     return metrics
 }
@@ -584,28 +592,20 @@ def cleanupResources() {
     try {
         echo "🧹 Nettoyage des ressources..."
 
-        // Nettoyage des fichiers temporaires
-        sh """
+        sh '''
             find . -type f -name "*.tmp" -delete || true
             find . -type d -name "node_modules" -exec rm -rf {} + || true
             find . -type f -name "*.log" -delete || true
-        """
 
-        // Compression des anciens rapports
-        sh """
             if [ -d "old-reports" ]; then
                 zip -r old-reports-${BUILD_NUMBER}.zip old-reports/
                 rm -rf old-reports/
             fi
-        """
 
-        // Nettoyage des conteneurs Docker
-        if (params.PLATFORM_NAME == 'Web') {
-            sh """
-                docker ps -a | grep 'selenium' | awk '{print \$1}' | xargs -r docker rm -f
-            """
-        }
-
+            if [ "$(docker ps -a | grep 'selenium')" != "" ]; then
+                docker ps -a | grep 'selenium' | awk '{print $1}' | xargs -r docker rm -f
+            fi
+        '''
     } catch (Exception e) {
         echo "⚠️ Erreur lors du nettoyage: ${e.message}"
     }
