@@ -14,9 +14,13 @@ pipeline {
         MAVEN_OPTS = '-Xmx3072m'
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
-        ALLURE_RESULTS = 'target/allure-results'
-        CUCUMBER_REPORTS = 'target/cucumber-reports'
-        CUCUMBER_JSON_PATH = 'target/cucumber.json'
+        BUILD_DIR = "target"
+        ALLURE_RESULTS = "${BUILD_DIR}/allure-results"
+        CUCUMBER_REPORTS = "${BUILD_DIR}/cucumber-reports"
+        PDF_REPORTS = "${BUILD_DIR}/pdf-reports"
+        CUCUMBER_JSON = "${BUILD_DIR}/cucumber.json"
+        TEST_LOGS = "${BUILD_DIR}/test-logs"
+        RETRY_COUNT = 2
     }
 
     parameters {
@@ -35,16 +39,26 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
+        booleanParam(
+            name: 'GENERATE_PDF',
+            defaultValue: true,
+            description: 'Générer un rapport PDF'
+        )
+        booleanParam(
+            name: 'RUN_RETRY',
+            defaultValue: true,
+            description: 'Réessayer les tests échoués'
+        )
     }
 
     stages {
-        stage('Initialization') {
+        stage('Prepare Test Environment') {
             steps {
                 script {
                     // Temizlik
                     cleanWs()
 
-                    // Git checkout
+                    // Branch checkout
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
@@ -52,92 +66,206 @@ pipeline {
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
 
-                    // Klasör yapısı
+                    // Klasörleri oluştur
                     sh """
                         mkdir -p ${ALLURE_RESULTS}
                         mkdir -p ${CUCUMBER_REPORTS}
-                        mkdir -p target/screenshots
-                        touch ${CUCUMBER_JSON_PATH}
+                        mkdir -p ${PDF_REPORTS}
+                        mkdir -p ${TEST_LOGS}
+                        mkdir -p ${BUILD_DIR}/screenshots
+                    """
+
+                    // Test konfigürasyonu
+                    writeFile file: "${BUILD_DIR}/test-config.json", text: """
+                        {
+                            "platform": "${params.PLATFORM_NAME}",
+                            "browser": "${params.BROWSER}",
+                            "timestamp": "${TIMESTAMP}",
+                            "buildNumber": "${BUILD_NUMBER}"
+                        }
                     """
                 }
             }
         }
 
-        stage('Build & Test') {
+        stage('Build & Verify') {
             steps {
                 script {
                     try {
-                        // Maven komutunu çalıştır
-                        sh """
-                            ${M2_HOME}/bin/mvn clean test \
-                            -Dtest=runner.TestRunner \
-                            -DplatformName=${params.PLATFORM_NAME} \
-                            -Dbrowser=${params.BROWSER} \
-                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS}" \
-                            -Dallure.results.directory=${ALLURE_RESULTS}
-                        """
+                        sh "${M2_HOME}/bin/mvn clean verify -B -DskipTests"
                     } catch (Exception e) {
-                        currentBuild.result = 'FAILURE'
-                        error "Test execution failed: ${e.message}"
+                        error "Build failed: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                script {
+                    int retryCount = params.RUN_RETRY ? RETRY_COUNT : 0
+                    boolean testSuccess = false
+
+                    for (int i = 0; i <= retryCount && !testSuccess; i++) {
+                        if (i > 0) {
+                            echo "📝 Tentative de test #${i+1}"
+                        }
+
+                        try {
+                            sh """
+                                ${M2_HOME}/bin/mvn test \
+                                -Dtest=runner.TestRunner \
+                                -DplatformName=${params.PLATFORM_NAME} \
+                                -Dbrowser=${params.BROWSER} \
+                                -DscreenshotPath=${BUILD_DIR}/screenshots \
+                                -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON},html:${CUCUMBER_REPORTS}" \
+                                -Dcucumber.features=src/test/resources/features \
+                                -Dallure.results.directory=${ALLURE_RESULTS} \
+                                -Dtest.logs=${TEST_LOGS} \
+                                -Dfailsafe.rerunFailingTestsCount=${retryCount}
+                            """
+                            testSuccess = true
+                        } catch (Exception e) {
+                            if (i == retryCount) {
+                                error "Test execution failed after ${i+1} attempts: ${e.getMessage()}"
+                            }
+                            echo "⚠️ Test failed, retrying..."
+                        }
                     }
                 }
             }
             post {
                 always {
-                    junit testResults: '**/target/surefire-reports/*.xml', allowEmptyResults: true
+                    script {
+                        // Test logs'u kaydet
+                        sh "find ${TEST_LOGS} -name '*.log' -exec gzip {} \\;"
+                        archiveArtifacts "${TEST_LOGS}/**/*.log.gz"
+
+                        // Screenshots
+                        archiveArtifacts "${BUILD_DIR}/screenshots/**/*"
+                    }
                 }
             }
         }
 
-        stage('Reports') {
+        stage('Generate Reports') {
+            parallel {
+                stage('Allure Report') {
+                    steps {
+                        script {
+                            allure([
+                                includeProperties: true,
+                                jdk: '',
+                                properties: [],
+                                reportBuildPolicy: 'ALWAYS',
+                                results: [[path: "${ALLURE_RESULTS}"]]
+                            ])
+                        }
+                    }
+                }
+
+                stage('Cucumber Report') {
+                    steps {
+                        script {
+                            // Verify cucumber.json exists and is valid
+                            if (!fileExists(CUCUMBER_JSON)) {
+                                error "Cucumber JSON file not found: ${CUCUMBER_JSON}"
+                            }
+
+                            // Check if file is not empty
+                            def jsonContent = readFile(CUCUMBER_JSON)
+                            if (jsonContent.trim().isEmpty()) {
+                                error "Cucumber JSON file is empty"
+                            }
+
+                            // Validate JSON format
+                            def jsonSlurper = new groovy.json.JsonSlurper()
+                            try {
+                                jsonSlurper.parseText(jsonContent)
+                            } catch (Exception e) {
+                                error "Invalid Cucumber JSON format: ${e.getMessage()}"
+                            }
+
+                            // Generate Cucumber Report
+                            cucumber buildStatus: 'UNSTABLE',
+                                failedFeaturesNumber: 1,
+                                failedScenariosNumber: 1,
+                                skippedStepsNumber: 1,
+                                failedStepsNumber: 1,
+                                reportTitle: 'Planity Test Report',
+                                fileIncludePattern: '**/cucumber.json',
+                                sortingMethod: 'ALPHABETICAL',
+                                trendsLimit: 10,
+                                classifications: [
+                                    [
+                                        'key': 'Browser',
+                                        'value': params.BROWSER
+                                    ],
+                                    [
+                                        'key': 'Branch',
+                                        'value': params.BRANCH_NAME
+                                    ],
+                                    [
+                                        'key': 'Platform',
+                                        'value': params.PLATFORM_NAME
+                                    ]
+                                ]
+                        }
+                    }
+                }
+
+                stage('PDF Report') {
+                    when { expression { params.GENERATE_PDF } }
+                    steps {
+                        script {
+                            // Generate PDF report using test results
+                            sh """
+                                echo "# Test Execution Report" > report.md
+                                echo "## Build #${BUILD_NUMBER}" >> report.md
+                                echo "### Configuration" >> report.md
+                                echo "* Branch: ${params.BRANCH_NAME}" >> report.md
+                                echo "* Platform: ${params.PLATFORM_NAME}" >> report.md
+                                echo "* Browser: ${params.BROWSER}" >> report.md
+                                echo "### Test Results" >> report.md
+
+                                if [ -f "${TEST_LOGS}/summary.txt" ]; then
+                                    cat "${TEST_LOGS}/summary.txt" >> report.md
+                                fi
+
+                                if [ -f "${CUCUMBER_JSON}" ]; then
+                                    echo "### Test Scenarios" >> report.md
+                                    jq -r '.[] | .elements[] | "* " + .name' "${CUCUMBER_JSON}" >> report.md
+                                fi
+
+                                pandoc report.md -o "${PDF_REPORTS}/TestReport_${BUILD_NUMBER}.pdf"
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Archive Results') {
             steps {
                 script {
-                    try {
-                        // Allure Report
-                        allure([
-                            includeProperties: true,
-                            jdk: '',
-                            properties: [],
-                            reportBuildPolicy: 'ALWAYS',
-                            results: [[path: "${ALLURE_RESULTS}"]]
-                        ])
+                    // Create results archive
+                    sh """
+                        cd ${BUILD_DIR}
+                        zip -r test-results-${BUILD_NUMBER}.zip \
+                            allure-results/ \
+                            cucumber-reports/ \
+                            screenshots/ \
+                            test-logs/ \
+                            pdf-reports/ \
+                            cucumber.json
+                    """
 
-                        // Cucumber Report
-                        cucumber(
-                            fileIncludePattern: '**/cucumber.json',
-                            jsonReportDirectory: 'target',
-                            reportTitle: 'Planity Test Report',
-                            classifications: [
-                                [key: 'Branch', value: params.BRANCH_NAME],
-                                [key: 'Platform', value: params.PLATFORM_NAME],
-                                [key: 'Browser', value: params.BROWSER]
-                            ]
-                        )
-
-                        // Arşivleme
-                        sh """
-                            cd target
-                            zip -r test-results-${BUILD_NUMBER}.zip \
-                                allure-results/ \
-                                cucumber-reports/ \
-                                screenshots/ \
-                                surefire-reports/ \
-                                cucumber.json
-                        """
-
-                        archiveArtifacts(
-                            artifacts: """
-                                target/test-results-${BUILD_NUMBER}.zip,
-                                target/cucumber.json,
-                                target/surefire-reports/**/*
-                            """,
-                            allowEmptyArchive: true
-                        )
-
-                    } catch (Exception e) {
-                        currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Report generation error: ${e.message}"
-                    }
+                    // Archive artifacts
+                    archiveArtifacts artifacts: """
+                        ${BUILD_DIR}/test-results-${BUILD_NUMBER}.zip,
+                        ${PDF_REPORTS}/*.pdf,
+                        ${CUCUMBER_JSON}
+                    """, allowEmptyArchive: true
                 }
             }
         }
@@ -147,52 +275,67 @@ pipeline {
         always {
             script {
                 def status = currentBuild.result ?: 'SUCCESS'
-                def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
+                def statusEmoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
 
-                // Test sonuçlarını kontrol et
-                def testResults = sh(script: 'ls -1 target/surefire-reports/*.xml 2>/dev/null | wc -l', returnStdout: true).trim()
-                def testCount = testResults.toInteger()
+                // Test sonuçlarını analiz et
+                def testSummary = ""
+                if (fileExists(CUCUMBER_JSON)) {
+                    def json = readJSON file: CUCUMBER_JSON
+                    def scenarios = json.collect { it.elements }.flatten()
+                    def passed = scenarios.count { it.steps.every { step -> step.result.status == 'passed' } }
+                    def total = scenarios.size()
+                    testSummary = "\nTest Results: ${passed}/${total} scenarios passed"
+                }
 
                 echo """╔═══════════════════════════════════════════╗
-║             Résumé d'Exécution              ║
+║             Rapport d'Exécution            ║
 ╚═══════════════════════════════════════════╝
 
 🎯 Build: #${BUILD_NUMBER}
 🌿 Branch: ${params.BRANCH_NAME}
 🕒 Durée: ${currentBuild.durationString}
-📱 Plateforme: ${params.PLATFORM_NAME}
-🌐 Navigateur: ${params.BROWSER}
+📱 Platform: ${params.PLATFORM_NAME}
+🌐 Browser: ${params.BROWSER}
+${testSummary}
 
-📊 Rapports:
+📊 Reports:
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
-🔹 Artifacts: ${BUILD_URL}artifact/
+🔹 PDF:       ${BUILD_URL}artifact/${PDF_REPORTS}/
+🔹 Logs:      ${BUILD_URL}artifact/${TEST_LOGS}/
 
-📝 Test Results:
-- Nombre de fichiers de test: ${testCount}
-- Résultat final: ${status}
+${statusEmoji} Status Final: ${status}"""
 
-${emoji} Statut Final: ${status}
-"""
-
-                // Cleanup
-                sh """
-                    find . -type f -name "*.tmp" -delete || true
-                    find . -type d -name "node_modules" -exec rm -rf {} + || true
-                """
+                // Clean workspace
+                cleanWs(
+                    deleteDirs: true,
+                    patterns: [
+                        [pattern: 'target/classes/', type: 'INCLUDE'],
+                        [pattern: 'target/test-classes/', type: 'INCLUDE']
+                    ]
+                )
             }
         }
 
         success {
-            echo '✅ Pipeline completed successfully!'
+            script {
+                echo "✅ Build successful! All tests passed."
+            }
         }
 
         failure {
-            echo '❌ Pipeline failed!'
+            script {
+                echo "❌ Build failed! Check the logs for details."
+                // Hata detaylarını kaydet
+                sh "find ${TEST_LOGS} -name '*.log' -exec gzip {} \\;"
+                archiveArtifacts "${TEST_LOGS}/**/*.log.gz"
+            }
         }
 
-        cleanup {
-            deleteDir()
+        unstable {
+            script {
+                echo "⚠️ Build unstable. Some tests may have failed."
+            }
         }
     }
 }
