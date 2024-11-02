@@ -115,21 +115,23 @@ stages {
                     """
 
                     // Installation de ffmpeg pour MacOS si nécessaire
-                    if (params.ENABLE_VIDEO) {
-                        sh '''
-                            if ! command -v ffmpeg &> /dev/null; then
-                                if [ "$(uname)" = "Darwin" ]; then
-                                    brew install ffmpeg
-                                else
-                                    echo "ffmpeg est requis pour l'enregistrement vidéo"
-                                    exit 1
-                                fi
-                            fi
-                        '''
+
+                if (params.ENABLE_VIDEO) {
+                    script {
+                        def isMac = sh(script: 'uname', returnStdout: true).trim() == 'Darwin'
+                        if (isMac) {
+                            def hasFfmpeg = sh(script: 'which ffmpeg || true', returnStdout: true).trim()
+                            if (!hasFfmpeg) {
+                                error "ffmpeg est requis pour l'enregistrement vidéo. Veuillez l'installer manuellement sur votre Mac."
+                            }
+                        }
                     }
                 }
-            }
-        }
+
+                def getUserId() {
+                    return currentBuild.rawBuild.getCause(hudson.model.Cause$UserIdCause)?.userId ?: 'System'
+                }
+
 
         stage('Test Execution') {
             steps {
