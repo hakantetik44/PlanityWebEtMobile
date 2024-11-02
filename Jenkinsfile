@@ -107,7 +107,7 @@ pipeline {
                         }
 
                         mvnCommand += """ \
-                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
+                            -Dcucumber.plugin="pretty,json:target/cucumber.json,io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn > test_output.log
                         """
 
@@ -124,14 +124,12 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Allure Reports
                         allure([
                             includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        // Cucumber Reports
                         cucumber buildStatus: 'UNSTABLE',
                             reportTitle: 'Planity Test Automation Report',
                             fileIncludePattern: '**/cucumber.json',
@@ -199,17 +197,6 @@ Plateforme: ${env.PLATFORM_NAME}
 ${env.PLATFORM_NAME == 'Web' ? "Navigateur: ${env.BROWSER}" : ''}
 ${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
             }
-
-            publishHTML([
-                allowMissing: false,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: 'target/cucumber-reports',
-                reportFiles: 'overview-features.html',
-                reportName: 'Cucumber HTML Report',
-                reportTitles: ''
-            ])
-
             cleanWs notFailBuild: true
         }
     }
