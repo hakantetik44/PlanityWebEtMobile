@@ -130,7 +130,6 @@ pipeline {
                             classifications: [
                                 [key: '🏢 Project', value: PROJECT_NAME],
                                 [key: '📌 Version', value: PROJECT_VERSION],
-                                [key: '👥 Team', value: TEAM_NAME],
                                 [key: '🌿 Branch', value: params.BRANCH_NAME],
                                 [key: '📱 Platform', value: params.PLATFORM_NAME],
                                 [key: '🌐 Browser', value: params.BROWSER],
@@ -139,11 +138,9 @@ pipeline {
                                 [key: '👨‍💻 Executed By', value: currentBuild.getBuildCauses()[0].userId ?: 'System'],
                                 [key: '⏱️ Duration', value: currentBuild.durationString],
                                 [key: '🌡️ Environment', value: TEST_ENVIRONMENT],
-                                [key: '🎯 Test Suite', value: params.TEST_SUITE],
-                                [key: '🔍 Framework', value: 'Cucumber with Selenium'],
                                 [key: '📝 Language', value: 'FR'],
-                                [key: '☕ Java Version', value: sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()],
-                                [key: '🏗️ Maven Version', value: sh(script: '${M2_HOME}/bin/mvn -version | head -n 1', returnStdout: true).trim()]
+                                [key: '☕ Java Version', value: sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()]
+
                             ]
                         )
 
