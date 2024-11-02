@@ -15,17 +15,12 @@ pipeline {
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
         ALLURE_RESULTS = 'target/allure-results'
-        PDF_REPORTS = 'target/pdf-reports'
+        EXCEL_REPORTS = 'target/rapports-tests'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
-        VIDEO_DIR = "${PDF_REPORTS}/videos"
+        VIDEO_DIR = "${EXCEL_REPORTS}/videos"
     }
 
     parameters {
-        choice(
-            name: 'BRANCH_NAME',
-            choices: ['main', 'dev', 'feature/*', 'bugfix/*'],
-            description: 'Sélectionnez la branche à tester'
-        )
         choice(
             name: 'PLATFORM_NAME',
             choices: ['Web', 'Android', 'iOS'],
@@ -36,62 +31,28 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
-        booleanParam(
-            name: 'RECORD_VIDEO',
-            defaultValue: true,
-            description: 'Activer l\'enregistrement vidéo'
-        )
     }
 
     stages {
-        stage('Branch Selection') {
-            steps {
-                script {
-                    sh "git fetch --all"
-                    def branches = sh(
-                        script: 'git branch -r | grep -v HEAD | sed "s/origin\\///"',
-                        returnStdout: true
-                    ).trim().split('\n')
-
-                    echo "🌿 Available branches: ${branches.join(', ')}"
-
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: "*/${params.BRANCH_NAME}"]],
-                        extensions: [],
-                        userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
-                    ])
-                }
-            }
-        }
-
         stage('Initialisation') {
             steps {
                 script {
-                    echo """╔═══════════════════════════════╗
-      ║ Démarrage de l'Automatisation ║
-      ╚═══════════════════════════════╝"""
+                    echo "╔═══════════════════════════════╗\n║ Démarrage de l'Automatisation ║\n╚═══════════════════════════════╝"
+                    cleanWs()
+                    checkout scm
 
-                    // Create directories and set permissions
                     sh """
-                        mkdir -p ${PDF_REPORTS}/videos
-                        mkdir -p ${ALLURE_RESULTS}
-                        mkdir -p ${CUCUMBER_REPORTS}
+                        mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS}
                         mkdir -p target/screenshots
-                        touch ${PDF_REPORTS}/ffmpeg.log
-                        chmod -R 777 ${PDF_REPORTS}
-                        chmod 777 ${PDF_REPORTS}/ffmpeg.log
-                    """
-
-                    // Check ffmpeg installation
-                    sh """
-                        if ! command -v ffmpeg &> /dev/null; then
-                            brew install ffmpeg || apt-get install -y ffmpeg || yum install -y ffmpeg
-                        fi
+                        chmod -R 777 ${VIDEO_DIR}
+                        export JAVA_HOME=${JAVA_HOME}
+                        java -version
+                        ${M2_HOME}/bin/mvn -version
                     """
                 }
             }
         }
+
         stage('Construction') {
             steps {
                 script {
@@ -112,29 +73,21 @@ pipeline {
                     try {
                         echo "🧪 Lancement des tests..."
 
-                        if (params.RECORD_VIDEO) {
-                            echo "🎥 Démarrage de l'enregistrement vidéo..."
-                            sh """
-                                mkdir -p ${PDF_REPORTS}/videos
-                                touch ${PDF_REPORTS}/ffmpeg.log
+                        // Démarre l'enregistrement vidéo
+                        sh """
+                            ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
+                            -codec:v libx264 -r 30 -pix_fmt yuv420p \
+                            ${VIDEO_DIR}/test_execution_${BUILD_NUMBER}.mp4 \
+                            2>${EXCEL_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
+                        """
 
-                                DISPLAY=:0 ffmpeg -y -f x11grab -video_size 1920x1080 -i :0.0 \
-                                -codec:v libx264 -r 30 -pix_fmt yuv420p \
-                                ${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4 \
-                                2>${PDF_REPORTS}/ffmpeg.log & \
-                                echo \$! > ${PDF_REPORTS}/videos/recording.pid
-
-                                sleep 2
-                            """
-                        }
-
+                        // Exécute les tests
                         sh """
                             ${M2_HOME}/bin/mvn test \
                             -Dtest=runner.TestRunner \
                             -DplatformName=${params.PLATFORM_NAME} \
                             -Dbrowser=${params.BROWSER} \
-                            -DvideoDir=${PDF_REPORTS}/videos \
-                            -DrecordVideo=${params.RECORD_VIDEO} \
+                            -DvideoDir=${VIDEO_DIR} \
                             -DscreenshotsDir=target/screenshots \
                             -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -Dallure.results.directory=${ALLURE_RESULTS}
@@ -144,33 +97,32 @@ pipeline {
                         currentBuild.result = 'FAILURE'
                         throw e
                     } finally {
-                        if (params.RECORD_VIDEO) {
-                            echo "🎥 Arrêt de l'enregistrement vidéo..."
-                            sh """
-                                if [ -f "${PDF_REPORTS}/videos/recording.pid" ]; then
-                                    PID=\$(cat ${PDF_REPORTS}/videos/recording.pid)
-                                    kill \$PID || true
-                                    rm ${PDF_REPORTS}/videos/recording.pid
-                                fi
-
-                                sleep 2
-                                if [ -f "${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4" ]; then
-                                    echo "✅ Vidéo enregistrée avec succès"
-                                    ls -lh ${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4
-                                else
-                                    echo "❌ Échec de l'enregistrement vidéo"
-                                    cat ${PDF_REPORTS}/ffmpeg.log
-                                fi
-                            """
-                        }
+                        sh """
+                            if [ -f "${VIDEO_DIR}/recording.pid" ]; then
+                                kill \$(cat ${VIDEO_DIR}/recording.pid) || true
+                                rm ${VIDEO_DIR}/recording.pid
+                            fi
+                        """
                     }
                 }
             }
         }
+
         stage('Rapports') {
             steps {
                 script {
                     try {
+                        // Crée les archives
+                        sh """
+                            cd target
+                            zip -r test-results-${BUILD_NUMBER}.zip \
+                                allure-results/ \
+                                cucumber-reports/ \
+                                screenshots/ \
+                                ${EXCEL_REPORTS}/videos/
+                        """
+
+                        // Génère les rapports
                         allure([
                             includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
@@ -182,22 +134,57 @@ pipeline {
                             fileIncludePattern: '**/cucumber.json',
                             trendsLimit: 10,
                             classifications: [
-                                ['key': '🌿 Branch', 'value': params.BRANCH_NAME],
                                 ['key': '🚀 Platform', 'value': params.PLATFORM_NAME],
                                 ['key': '🌐 Browser', 'value': params.BROWSER],
-                                ['key': '🎥 Video', 'value': params.RECORD_VIDEO ? 'Enabled' : 'Disabled']
+                                ['key': '🎥 Video', 'value': 'Available']
                             ]
 
-                        sh """
-                            cd target
-                            zip -r test-results.zip allure-results cucumber-reports
-                            mv test-results.zip ${PDF_REPORTS}
-                        """
+                        // Archive les artifacts
+                        archiveArtifacts artifacts: """
+                            ${EXCEL_REPORTS}/**/*.xlsx,
+                            ${VIDEO_DIR}/**/*.mp4,
+                            target/test-results-${BUILD_NUMBER}.zip,
+                            target/cucumber.json
+                        """, allowEmptyArchive: true
+
                     } catch (Exception e) {
-                        currentBuild.result = 'FAILURE'
-                        throw e
+                        currentBuild.result = 'UNSTABLE'
+                        echo "⚠️ Erreur rapports: ${e.message}"
                     }
                 }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def status = currentBuild.result ?: 'SUCCESS'
+                def statusEmoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
+
+                echo """╔═══════════════════════════════════════════╗
+║             Résumé d'Exécution              ║
+╚═══════════════════════════════════════════╝
+
+🎯 Build: #${BUILD_NUMBER}
+🕒 Durée: ${currentBuild.durationString}
+📱 Plateforme: ${params.PLATFORM_NAME}
+🌐 Navigateur: ${params.BROWSER}
+
+📊 Rapports:
+🔹 Allure:    ${BUILD_URL}allure/
+🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
+🔹 Video:     ${BUILD_URL}artifact/${VIDEO_DIR}/
+🔹 Excel:     ${BUILD_URL}artifact/${EXCEL_REPORTS}/
+
+${statusEmoji} Statut Final: ${status}
+"""
+
+                // Nettoie l'espace de travail
+                sh """
+                    find . -type f -name '*.tmp' -delete
+                    find . -type f -name '*.log' -mtime +7 -delete
+                """
             }
         }
     }
