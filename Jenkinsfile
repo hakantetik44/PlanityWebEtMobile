@@ -23,7 +23,7 @@ pipeline {
     parameters {
         choice(
             name: 'BRANCH_NAME',
-            choices: getBranchNames(),
+            choices: [],
             description: 'Sélectionnez la branche à tester'
         )
         choice(
@@ -47,22 +47,27 @@ pipeline {
         stage('Branch Selection') {
             steps {
                 script {
+                    // Fetch current branches from GitHub
+                    sh "git fetch --all"
+                    def branches = sh(
+                        script: 'git branch -r | grep -v HEAD | sed "s/origin\\///"',
+                        returnStdout: true
+                    ).trim().split('\n')
+
+                    // Update parameter choices dynamically
+                    def branchChoices = branches.join(',')
+                    echo "🌿 Available branches: ${branchChoices}"
+
+                    // Set parameter choices
+                    currentBuild.rawBuild.getAction(ParametersAction).getParameter('BRANCH_NAME').setChoices(branches)
+
+                    // Select the branch to checkout
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
                         extensions: [],
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
-                }
-            }
-        }
-
-        stage('Get Branch Names') {
-            steps {
-                script {
-                    def branches = sh(script: 'git ls-remote --heads https://github.com/hakantetik44/PlanityWebEtMobile.git', returnStdout: true).trim().split('\n')
-                    def branchNames = branches.collect { it.split('/')[2] }.unique()
-                    env.BRANCH_OPTIONS = branchNames.join(',')
                 }
             }
         }
@@ -94,7 +99,6 @@ pipeline {
                 }
             }
         }
-
         stage('Construction') {
             steps {
                 script {
@@ -116,21 +120,26 @@ pipeline {
                         echo "🧪 Lancement des tests..."
 
                         if (params.RECORD_VIDEO) {
+                            // Start video recording with timestamp
                             echo "🎥 Démarrage de l'enregistrement vidéo..."
                             sh """
+                                # Ensure directories exist
                                 mkdir -p ${PDF_REPORTS}/videos
                                 touch ${PDF_REPORTS}/ffmpeg.log
 
+                                # Start recording
                                 DISPLAY=:0 ffmpeg -y -f x11grab -video_size 1920x1080 -i :0.0 \
                                 -codec:v libx264 -r 30 -pix_fmt yuv420p \
                                 ${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4 \
                                 2>${PDF_REPORTS}/ffmpeg.log & \
                                 echo \$! > ${PDF_REPORTS}/videos/recording.pid
 
+                                # Wait a moment to ensure recording starts
                                 sleep 2
                             """
                         }
 
+                        // Run tests
                         sh """
                             ${M2_HOME}/bin/mvn test \
                             -Dtest=runner.TestRunner \
@@ -148,6 +157,7 @@ pipeline {
                         throw e
                     } finally {
                         if (params.RECORD_VIDEO) {
+                            // Stop video recording
                             echo "🎥 Arrêt de l'enregistrement vidéo..."
                             sh """
                                 if [ -f "${PDF_REPORTS}/videos/recording.pid" ]; then
@@ -156,6 +166,7 @@ pipeline {
                                     rm ${PDF_REPORTS}/videos/recording.pid
                                 fi
 
+                                # Check video file
                                 sleep 2
                                 if [ -f "${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4" ]; then
                                     echo "✅ Vidéo enregistrée avec succès"
@@ -170,7 +181,6 @@ pipeline {
                 }
             }
         }
-
         stage('Rapports') {
             steps {
                 script {
@@ -237,8 +247,16 @@ pipeline {
 🌐 Navigateur: ${params.BROWSER}
 🎥 Video: ${params.RECORD_VIDEO ? 'Activé' : 'Désactivé'}
 
-📌 Statut: ${statusEmoji} ${status}
+📊 Rapports:
+🔹 Allure:    ${BUILD_URL}allure/
+🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
+🔹 Video:     ${BUILD_URL}artifact/${VIDEO_DIR}/
+
+${statusEmoji} Statut Final: ${status}
 """
+
+                // Cleanup
+                cleanWs(patterns: [[pattern: 'target/classes/', type: 'INCLUDE']])
             }
         }
     }
