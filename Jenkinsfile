@@ -47,38 +47,18 @@ pipeline {
                     cleanWs()
                     checkout scm
 
-                    if (fileExists('src/test/resources/configuration.properties')) {
-                        def configContent = sh(
-                            script: 'cat src/test/resources/configuration.properties',
-                            returnStdout: true
-                        ).trim()
-
-                        def props = configContent.split('\n').collectEntries { line ->
-                            def parts = line.split('=')
-                            if (parts.size() == 2) {
-                                [(parts[0].trim()): parts[1].trim()]
-                            } else {
-                                [:]
-                            }
-                        }
-
-                        env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
-                        env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
-
-                        writeFile file: 'target/allure-results/environment.properties', text: """
-                            Platform=${env.PLATFORM_NAME}
-                            Browser=${env.BROWSER}
-                            Test Framework=Cucumber
-                            Language=FR
-                        """.stripIndent()
-                    }
-
-                    echo """Configuration:
-                    • Plateforme: ${env.PLATFORM_NAME}
-                    • Navigateur: ${env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'}"""
+                    // Créer le fichier de configuration
+                    writeFile file: 'config/configuration.properties', text: """
+                        platformName=${params.PLATFORM_NAME}
+                        browser=${params.BROWSER}
+                        recordVideo=${params.RECORD_VIDEO}
+                        url=https://www.planity.com/
+                        implicitWait=10
+                        explicitWait=15
+                    """
 
                     sh """
-                        mkdir -p ${EXCEL_REPORTS}/videos ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${TEST_LOGS}
+                        mkdir -p ${EXCEL_REPORTS}/videos ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${TEST_LOGS} config
                         mkdir -p target/screenshots
                         export JAVA_HOME=${JAVA_HOME}
                         java -version
@@ -93,7 +73,7 @@ pipeline {
                 script {
                     try {
                         echo "📦 Installation des dépendances..."
-                        sh "${M2_HOME}/bin/mvn clean install -DskipTests -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn"
+                        sh "${M2_HOME}/bin/mvn clean install -DskipTests"
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         throw e
@@ -110,7 +90,6 @@ pipeline {
 
                         if (params.RECORD_VIDEO) {
                             sh """
-                                # Démarrer l'enregistrement vidéo
                                 ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
                                 -codec:v libx264 -r 30 \
                                 ${EXCEL_REPORTS}/videos/test-execution-${TIMESTAMP}.mp4 \
@@ -136,7 +115,7 @@ pipeline {
                         echo "⚠️ Erreur pendant l'exécution des tests: ${e.message}"
                     } finally {
                         if (params.RECORD_VIDEO) {
-                            sh "if [ -f .recording.pid ]; then kill \$(cat .recording.pid); rm .recording.pid; fi"
+                            sh "if [ -f .recording.pid ]; then kill \$(cat .recording.pid) || true; rm .recording.pid; fi"
                         }
                     }
                 }
@@ -147,20 +126,11 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Create archives
+                        // Zip archives
                         sh """
-                            cd target
-
-                            # Créer l'archive des résultats de test avec les vidéos
-                            zip -r test-results-${TIMESTAMP}.zip \
-                                allure-results/ \
-                                cucumber-reports/ \
-                                screenshots/ \
-                                test-logs/
-
-                            # Créer une archive séparée pour les vidéos
                             cd ${EXCEL_REPORTS}
                             zip -r test-videos-${TIMESTAMP}.zip videos/
+                            cd -
                         """
 
                         // Allure Report
@@ -181,15 +151,12 @@ pipeline {
                                 ['key': 'Video Recording', 'value': params.RECORD_VIDEO ? 'Enabled' : 'Disabled']
                             ]
 
-                        // Archive all artifacts
                         archiveArtifacts artifacts: """
                             ${EXCEL_REPORTS}/**/*.xlsx,
                             ${EXCEL_REPORTS}/videos/**/*.mp4,
-                            ${EXCEL_REPORTS}/test-videos-${TIMESTAMP}.zip,
-                            target/allure-report.zip,
-                            target/cucumber-reports.zip,
+                            ${EXCEL_REPORTS}/test-videos-*.zip,
                             target/cucumber.json,
-                            target/test-results-${TIMESTAMP}.zip
+                            target/test-results-*.zip
                         """, allowEmptyArchive: true
 
                     } catch (Exception e) {
@@ -225,30 +192,8 @@ pipeline {
 
 ${status == 'SUCCESS' ? '✅ SUCCÈS' : status == 'UNSTABLE' ? '⚠️ INSTABLE' : '❌ ÉCHEC'}"""
 
-                // Cleanup workspace but keep reports
-                sh """
-                    if [ -d "target" ]; then
-                        find target -type f ! -name '*.zip' ! -name '*.xlsx' ! -name '*.json' ! -name '*.mp4' ! -name '*.png' -delete
-                    fi
-                """
+                cleanWs(patterns: [[pattern: 'target/classes/', type: 'INCLUDE']])
             }
-        }
-
-        failure {
-            script {
-                echo "❌ Des échecs ont été détectés. Consultez les rapports pour plus de détails."
-            }
-        }
-
-        cleanup {
-            cleanWs(
-                deleteDirs: true,
-                patterns: [
-                    [pattern: 'target/classes/', type: 'INCLUDE'],
-                    [pattern: 'target/test-classes/', type: 'INCLUDE'],
-                    [pattern: '**/.git/', type: 'INCLUDE']
-                ]
-            )
         }
     }
 }
