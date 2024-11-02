@@ -17,7 +17,6 @@ pipeline {
         ALLURE_RESULTS = 'target/allure-results'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         CUCUMBER_JSON_PATH = 'target/cucumber.json'
-        EXCEL_REPORT_PATH = 'target/test-report.xlsx' // Define Excel report path
     }
 
     parameters {
@@ -42,13 +41,18 @@ pipeline {
         stage('Initialization') {
             steps {
                 script {
+                    // Temizlik
                     cleanWs()
+
+                    // Git checkout
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
                         extensions: [[$class: 'CleanBeforeCheckout']],
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
+
+                    // Klasör yapısı
                     sh """
                         mkdir -p ${ALLURE_RESULTS}
                         mkdir -p ${CUCUMBER_REPORTS}
@@ -63,6 +67,7 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Maven komutunu çalıştır
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
                             -Dtest=runner.TestRunner \
@@ -88,6 +93,7 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Allure Report
                         allure([
                             includeProperties: true,
                             jdk: '',
@@ -96,6 +102,7 @@ pipeline {
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
+                        // Cucumber Report
                         cucumber(
                             fileIncludePattern: '**/cucumber.json',
                             jsonReportDirectory: 'target',
@@ -107,6 +114,7 @@ pipeline {
                             ]
                         )
 
+                        // Arşivleme
                         sh """
                             cd target
                             zip -r test-results-${BUILD_NUMBER}.zip \
@@ -125,6 +133,7 @@ pipeline {
                             """,
                             allowEmptyArchive: true
                         )
+
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
                         echo "⚠️ Report generation error: ${e.message}"
@@ -133,7 +142,6 @@ pipeline {
             }
         }
 
-        // New stage for Excel Report Generation
         stage('Generate Excel Report') {
             steps {
                 script {
@@ -150,7 +158,6 @@ pipeline {
                 }
             }
         }
-
     }
 
     post {
@@ -159,9 +166,11 @@ pipeline {
                 def status = currentBuild.result ?: 'SUCCESS'
                 def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
 
+                // Test sonuçlarını kontrol et
                 def testResults = sh(script: 'ls -1 target/surefire-reports/*.xml 2>/dev/null | wc -l', returnStdout: true).trim()
                 def testCount = testResults.toInteger()
 
+                // Rapor detayları
                 echo """╔═══════════════════════════════════════════╗
 ║              🌟 Résumé d'Exécution          ║
 ╚═══════════════════════════════════════════╝
@@ -177,7 +186,7 @@ pipeline {
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
 🔹 Artifacts: ${BUILD_URL}artifact/
-🔹 Excel Report: ${BUILD_URL}${EXCEL_REPORT_PATH}
+🔹 Excel Report: ${BUILD_URL}target/test-report.xlsx
 
 📝 Test Results:
 - 📁 Nombre de fichiers de test: ${testCount}
@@ -191,6 +200,7 @@ ${emoji} Statut Final: ${status}
 Les graphiques suivants montrent les statistiques de passage et d’échec des fonctionnalités.
 """
 
+                // Cleanup
                 sh """
                     find . -type f -name "*.tmp" -delete || true
                     find . -type d -name "node_modules" -exec rm -rf {} + || true
