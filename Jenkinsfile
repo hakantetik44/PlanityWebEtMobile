@@ -1,6 +1,11 @@
 pipeline {
     agent any
 
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        timestamps()
+    }
+
     tools {
         maven 'maven'
         jdk 'JDK17'
@@ -17,6 +22,7 @@ pipeline {
         ALLURE_RESULTS = 'target/allure-results'
         EXCEL_REPORTS = 'target/rapports-tests'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
+        VIDEO_DIR = "target/videos"
     }
 
     parameters {
@@ -30,48 +36,37 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
+        booleanParam(
+            name: 'VIDEO_RECORDING',
+            defaultValue: true,
+            description: 'Activer l\'enregistrement vidéo des tests'
+        )
+    }
+
+    triggers {
+        cron('0 0 * * *')
     }
 
     stages {
         stage('Initialisation') {
             steps {
                 script {
-                    echo "╔═══════════════════════════════╗\n║ Démarrage de l'Automatisation ║\n╚═══════════════════════════════╝"
+                    def description = """
+                    <h2>🤖 ${PROJECT_NAME}</h2>
+                    <p><b>🔄 Build:</b> #${env.BUILD_NUMBER}</p>
+                    <p><b>📱 Plateforme:</b> ${params.PLATFORM_NAME}</p>
+                    <p><b>🌐 Navigateur:</b> ${params.PLATFORM_NAME == 'Web' ? params.BROWSER : 'N/A'}</p>
+                    <p><b>📅 Date d'exécution:</b> ${TIMESTAMP}</p>
+                    <hr/>
+                    """
+
+                    currentBuild.description = description
                     cleanWs()
                     checkout scm
 
-                    if (fileExists('src/test/resources/configuration.properties')) {
-                        def configContent = sh(
-                            script: 'cat src/test/resources/configuration.properties',
-                            returnStdout: true
-                        ).trim()
-
-                        def props = configContent.split('\n').collectEntries { line ->
-                            def parts = line.split('=')
-                            if (parts.size() == 2) {
-                                [(parts[0].trim()): parts[1].trim()]
-                            } else {
-                                [:]
-                            }
-                        }
-
-                        env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
-                        env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
-
-                        writeFile file: 'target/allure-results/environment.properties', text: """
-                            Platform=${env.PLATFORM_NAME}
-                            Browser=${env.BROWSER}
-                            Test Framework=Cucumber
-                            Language=FR
-                        """.stripIndent()
-                    }
-
-                    echo """Configuration:
-                    • Plateforme: ${env.PLATFORM_NAME}
-                    • Navigateur: ${env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'}"""
-
                     sh """
-                        mkdir -p ${EXCEL_REPORTS} ${ALLURE_RESULTS} target/screenshots
+                        mkdir -p ${EXCEL_REPORTS} ${ALLURE_RESULTS} target/screenshots ${VIDEO_DIR}
+                        echo "Test execution started at ${TIMESTAMP}" > execution.log
                         export JAVA_HOME=${JAVA_HOME}
                         java -version
                         ${M2_HOME}/bin/mvn -version
@@ -85,7 +80,7 @@ pipeline {
                 script {
                     try {
                         echo "📦 Installation des dépendances..."
-                        sh "${M2_HOME}/bin/mvn clean install -DskipTests -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn"
+                        sh "${M2_HOME}/bin/mvn clean install -DskipTests -B"
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         throw e
@@ -94,21 +89,16 @@ pipeline {
             }
         }
 
-        stage('Exécution des Tests') {
+        stage('Tests') {
             steps {
                 script {
                     try {
-                        echo "🧪 Lancement des tests..."
-
-                        def mvnCommand = "${M2_HOME}/bin/mvn test -Dtest=runner.TestRunner -DplatformName=${env.PLATFORM_NAME}"
-
-                        if (env.PLATFORM_NAME == 'Web') {
-                            mvnCommand += " -Dbrowser=${env.BROWSER}"
-                        }
-
-                        mvnCommand += """ \
-                            -Dcucumber.plugin="pretty,json:target/cucumber.json,io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-                            -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn > test_output.log
+                        def mvnCommand = """
+                            ${M2_HOME}/bin/mvn test
+                            -Dtest=runner.TestRunner
+                            -DplatformName=${params.PLATFORM_NAME}
+                            ${params.PLATFORM_NAME == 'Web' ? "-Dbrowser=${params.BROWSER}" : ''}
+                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm"
                         """
 
                         sh mvnCommand
@@ -116,6 +106,26 @@ pipeline {
                         currentBuild.result = 'FAILURE'
                         throw e
                     }
+                }
+            }
+            post {
+                always {
+                    cucumber(
+                        buildStatus: 'UNSTABLE',
+                        reportTitle: "${PROJECT_NAME} - Build #${env.BUILD_NUMBER}",
+                        fileIncludePattern: '**/cucumber.json',
+                        trendsLimit: 10,
+                        classifications: [
+                            [
+                                'key': 'Platform',
+                                'value': params.PLATFORM_NAME
+                            ],
+                            [
+                                'key': 'Browser',
+                                'value': params.PLATFORM_NAME == 'Web' ? params.BROWSER : 'N/A'
+                            ]
+                        ]
+                    )
                 }
             }
         }
@@ -130,50 +140,69 @@ pipeline {
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        cucumber buildStatus: 'UNSTABLE',
-                            reportTitle: 'Planity Test Automation Report',
-                            fileIncludePattern: '**/cucumber.json',
-                            trendsLimit: 10,
-                            classifications: [
-                                [
-                                    'key': 'Platform',
-                                    'value': env.PLATFORM_NAME
-                                ],
-                                [
-                                    'key': 'Browser',
-                                    'value': env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'
-                                ],
-                                [
-                                    'key': 'Jenkins Job',
-                                    'value': env.JOB_NAME
-                                ],
-                                [
-                                    'key': 'Build',
-                                    'value': env.BUILD_NUMBER
-                                ]
-                            ]
-
                         sh """
                             if [ -d "${ALLURE_RESULTS}" ]; then
-                                cd target && zip -q -r allure-report.zip allure-results/
+                                cd target && zip -r allure-report.zip allure-results/
                             fi
                             if [ -d "${CUCUMBER_REPORTS}" ]; then
-                                cd target && zip -q -r cucumber-reports.zip cucumber-reports/
+                                cd target && zip -r cucumber-reports.zip cucumber-reports/
                             fi
                         """
+
+                        def reportIndex = """
+                        <html>
+                            <head>
+                                <title>Rapports de Test - Build #${env.BUILD_NUMBER}</title>
+                                <style>
+                                    body { font-family: Arial, sans-serif; margin: 20px; }
+                                    table { border-collapse: collapse; width: 100%; }
+                                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                                    th { background-color: #f2f2f2; }
+                                </style>
+                            </head>
+                            <body>
+                                <h1>🗂️ Rapports de Test - Build #${env.BUILD_NUMBER}</h1>
+                                <table>
+                                    <tr>
+                                        <th>Type de Rapport</th>
+                                        <th>Description</th>
+                                        <th>Lien</th>
+                                    </tr>
+                                    <tr>
+                                        <td>Allure Report</td>
+                                        <td>Rapport détaillé avec screenshots et logs</td>
+                                        <td><a href="../allure">Voir le rapport</a></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Cucumber Report</td>
+                                        <td>Rapport BDD avec statistiques</td>
+                                        <td><a href="../cucumber-html-reports/overview-features.html">Voir le rapport</a></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Excel Report</td>
+                                        <td>Rapport détaillé au format Excel</td>
+                                        <td><a href="artifact/${EXCEL_REPORTS}">Télécharger</a></td>
+                                    </tr>
+                                </table>
+                                <p><i>Généré le ${TIMESTAMP}</i></p>
+                            </body>
+                        </html>
+                        """
+                        writeFile file: 'target/report-index.html', text: reportIndex
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
                     }
                 }
             }
             post {
-                always {
+                success {
                     archiveArtifacts artifacts: """
-                        ${EXCEL_REPORTS}/**/*.xlsx,
                         target/allure-report.zip,
                         target/cucumber-reports.zip,
-                        target/cucumber.json
-                    """, allowEmptyArchive: true
+                        target/cucumber.json,
+                        target/report-index.html,
+                        ${EXCEL_REPORTS}/**/*.xlsx
+                    """, fingerprint: true
                 }
             }
         }
@@ -182,20 +211,33 @@ pipeline {
     post {
         always {
             script {
-                def testResults = fileExists('test_output.log') ? readFile('test_output.log').trim() : "Aucun résultat disponible"
+                def testSummary = """
+                ╔═══════════════════════════╗
+                ║   Résumé de l'Exécution   ║
+                ╚═══════════════════════════╝
 
-                echo """╔═══════════════════════════╗
-║   Résumé de l'Exécution   ║
-╚═══════════════════════════╝
+                🏗️ Build: #${env.BUILD_NUMBER}
+                📝 Rapports:
+                • Allure: ${BUILD_URL}allure
+                • Cucumber: ${BUILD_URL}cucumber-html-reports/overview-features.html
+                • Excel: ${BUILD_URL}artifact/${EXCEL_REPORTS}
+                • Index: ${BUILD_URL}artifact/target/report-index.html
 
-📝 Rapports:
-• Allure: ${BUILD_URL}allure/
-• Cucumber: ${BUILD_URL}cucumber-html-reports/overview-features.html
-• Excel: ${BUILD_URL}artifact/${EXCEL_REPORTS}/
+                📱 Plateforme: ${params.PLATFORM_NAME}
+                ${params.PLATFORM_NAME == 'Web' ? "🌐 Navigateur: ${params.BROWSER}" : ''}
 
-Plateforme: ${env.PLATFORM_NAME}
-${env.PLATFORM_NAME == 'Web' ? "Navigateur: ${env.BROWSER}" : ''}
-${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
+                ${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}
+                """
+
+                echo testSummary
+
+                def updatedDescription = currentBuild.description + """
+                <hr/>
+                <p><b>Statut:</b> ${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}</p>
+                <p><b>Durée:</b> ${currentBuild.durationString}</p>
+                """
+
+                currentBuild.description = updatedDescription
             }
             cleanWs notFailBuild: true
         }

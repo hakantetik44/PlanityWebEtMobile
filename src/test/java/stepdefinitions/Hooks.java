@@ -192,7 +192,7 @@ public class Hooks {
             System.out.println("• Statut: " + infosTest.getStatut());
 
             // Rapor oluştur
-            TestManager.getInstance().genererRapport("RadioFrance");
+            TestManager.getInstance().genererRapport("Planity");
             quitterDriver();
         }
     }
