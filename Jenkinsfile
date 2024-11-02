@@ -8,34 +8,39 @@ pipeline {
     }
 
     environment {
-        // Base Configuration
+        // Configuration de Base
         JAVA_HOME = "/usr/local/opt/openjdk@17"
         M2_HOME = tool 'maven'
         PATH = "${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}"
         MAVEN_OPTS = '-Xmx3072m'
 
-        // Project Information
+        // Informations du Projet
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
         PROJECT_VERSION = '1.0.0'
         TEAM_NAME = 'Quality Assurance'
 
-        // Timestamps and Directories
+        // Configuration des Répertoires
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
         ALLURE_RESULTS = 'target/allure-results'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         CUCUMBER_JSON_PATH = 'target/cucumber.json'
         EXCEL_REPORTS = 'target/rapports-tests'
 
-        // Video Recording Configuration
+        // Configuration Vidéo
         VIDEO_DIR = 'target/videos'
         SCREENSHOT_DIR = 'target/screenshots'
         RECORD_VIDEO = 'true'
         VIDEO_FRAME_RATE = '24'
         VIDEO_QUALITY = 'HIGH'
-
-        // Test Configuration
-        TEST_ENVIRONMENT = 'Production'
         SCREEN_RESOLUTION = '1920x1080'
+
+        // Configuration du Test
+        TEST_ENVIRONMENT = 'Production'
+
+        // Configuration OS-Spécifique
+        IS_MACOS = sh(script: 'uname -s', returnStdout: true).trim() == 'Darwin'
+        VIDEO_CAPTURE_DEVICE = IS_MACOS ? '1' : ':0.0'
+        PACKAGE_MANAGER = IS_MACOS ? 'brew' : 'apt-get'
     }
 
     parameters {
@@ -76,7 +81,6 @@ pipeline {
 
                     cleanWs()
 
-                    // Git checkout
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
@@ -84,7 +88,29 @@ pipeline {
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
 
-                    // Create directory structure
+                    // Configuration OS-spécifique pour la vidéo
+                    if (params.RECORD_VIDEO) {
+                        if (env.IS_MACOS) {
+                            sh """
+                                if ! command -v ffmpeg &> /dev/null; then
+                                    echo "Installation de ffmpeg pour l'enregistrement vidéo..."
+                                    if ! command -v brew &> /dev/null; then
+                                        echo "Installation de Homebrew..."
+                                        /bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                                    fi
+                                    brew install ffmpeg
+                                fi
+                            """
+                        } else {
+                            sh """
+                                if ! command -v ffmpeg &> /dev/null; then
+                                    echo "Installation de ffmpeg pour l'enregistrement vidéo..."
+                                    sudo apt-get update && sudo apt-get install -y ffmpeg
+                                fi
+                            """
+                        }
+                    }
+
                     sh """
                         mkdir -p ${ALLURE_RESULTS}
                         mkdir -p ${CUCUMBER_REPORTS}
@@ -92,7 +118,6 @@ pipeline {
                         mkdir -p ${SCREENSHOT_DIR}
                         mkdir -p ${VIDEO_DIR}
 
-                        # Create test environment configuration
                         echo "🔧 Configuration de l'environnement..."
                         echo "Platform=${params.PLATFORM_NAME}" > ${ALLURE_RESULTS}/environment.properties
                         echo "Browser=${params.BROWSER}" >> ${ALLURE_RESULTS}/environment.properties
@@ -101,16 +126,6 @@ pipeline {
                         echo "Environment=${TEST_ENVIRONMENT}" >> ${ALLURE_RESULTS}/environment.properties
                         echo "VideoRecording=${params.RECORD_VIDEO}" >> ${ALLURE_RESULTS}/environment.properties
                     """
-
-                    // Install video recording dependencies if needed
-                    if (params.RECORD_VIDEO) {
-                        sh """
-                            if ! command -v ffmpeg &> /dev/null; then
-                                echo "Installing ffmpeg for video recording..."
-                                apt-get update && apt-get install -y ffmpeg
-                            fi
-                        """
-                    }
                 }
             }
         }
@@ -121,19 +136,26 @@ pipeline {
                     try {
                         echo '🏗️ Compilation et exécution des tests...'
 
-                        // Start video recording if enabled
                         if (params.RECORD_VIDEO) {
-                            sh """
-                                # Start screen recording
-                                ffmpeg -y -f x11grab -video_size ${SCREEN_RESOLUTION} \
-                                -framerate ${VIDEO_FRAME_RATE} -i :0.0 \
-                                -pix_fmt yuv420p \
-                                "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
-                                echo \$! > video-pid
-                            """
+                            if (env.IS_MACOS) {
+                                sh """
+                                    ffmpeg -f avfoundation -i "1" -framerate ${VIDEO_FRAME_RATE} \
+                                    -video_size ${SCREEN_RESOLUTION} \
+                                    -vcodec libx264 -pix_fmt yuv420p \
+                                    "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
+                                    echo \$! > video-pid
+                                """
+                            } else {
+                                sh """
+                                    ffmpeg -y -f x11grab -video_size ${SCREEN_RESOLUTION} \
+                                    -framerate ${VIDEO_FRAME_RATE} -i :0.0 \
+                                    -pix_fmt yuv420p \
+                                    "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
+                                    echo \$! > video-pid
+                                """
+                            }
                         }
 
-                        // Run tests with enhanced configuration
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
                             -Dtest=runner.TestRunner \
@@ -150,12 +172,12 @@ pipeline {
                         currentBuild.result = 'FAILURE'
                         error "❌ Échec de l'exécution des tests: ${e.message}"
                     } finally {
-                        // Stop video recording if it was started
                         if (params.RECORD_VIDEO) {
                             sh """
                                 if [ -f video-pid ]; then
-                                    kill \$(cat video-pid)
+                                    kill \$(cat video-pid) || true
                                     rm video-pid
+                                    sleep 2
                                 fi
                             """
                         }
@@ -175,10 +197,8 @@ pipeline {
                     try {
                         echo '📊 Génération des rapports...'
 
-                        // Copy videos to Allure results if recorded
                         if (params.RECORD_VIDEO) {
                             sh """
-                                # Copy video files to Allure results
                                 if [ -d "${VIDEO_DIR}" ]; then
                                     mkdir -p ${ALLURE_RESULTS}/videos
                                     cp ${VIDEO_DIR}/*.mp4 ${ALLURE_RESULTS}/videos/ || true
@@ -186,7 +206,6 @@ pipeline {
                             """
                         }
 
-                        // Generate Allure Report
                         allure([
                             includeProperties: true,
                             jdk: '',
@@ -195,7 +214,6 @@ pipeline {
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        // Enhanced Cucumber Report
                         cucumber(
                             fileIncludePattern: '**/cucumber.json',
                             jsonReportDirectory: 'target',
@@ -216,7 +234,6 @@ pipeline {
                             ]
                         )
 
-                        // Archive artifacts
                         sh """
                             cd target
                             zip -r test-results-${BUILD_NUMBER}.zip \
@@ -257,7 +274,6 @@ pipeline {
                 def statusColor = status == 'SUCCESS' ? '\033[0;32m' : status == 'UNSTABLE' ? '\033[0;33m' : '\033[0;31m'
                 def resetColor = '\033[0m'
 
-                // Get test statistics
                 def totalFeatures = sh(script: 'find . -name "*.feature" | wc -l', returnStdout: true).trim()
                 def totalScenarios = sh(script: 'grep -r "Scenario:" features/ | wc -l', returnStdout: true).trim() ?: '0'
                 def successRate = status == 'SUCCESS' ? '100%' : status == 'UNSTABLE' ? '75%' : '0%'
@@ -317,7 +333,6 @@ ${emoji} Statut Final: ${statusColor}${status}${resetColor}
 ▪️ 📊 Dashboard: ${BUILD_URL}allure
 """
 
-                // Cleanup
                 sh """
                     find . -type f -name "*.tmp" -delete || true
                     find . -type d -name "node_modules" -exec rm -rf {} + || true
@@ -334,6 +349,7 @@ ${emoji} Statut Final: ${statusColor}${status}${resetColor}
         }
 
         cleanup {
+
             deleteDir()
         }
     }
