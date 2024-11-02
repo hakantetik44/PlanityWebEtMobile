@@ -17,6 +17,7 @@ pipeline {
         ALLURE_RESULTS = 'target/allure-results'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         CUCUMBER_JSON_PATH = 'target/cucumber.json'
+        CUCUMBER_PUBLISH_ENABLED = 'true'
     }
 
     parameters {
@@ -67,13 +68,13 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Maven komutunu çalıştır
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
                             -Dtest=runner.TestRunner \
                             -DplatformName=${params.PLATFORM_NAME} \
                             -Dbrowser=${params.BROWSER} \
-                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS}" \
+                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS},timeline:${CUCUMBER_REPORTS}/timeline" \
+                            -Dcucumber.publish.enabled=true \
                             -Dallure.results.directory=${ALLURE_RESULTS}
                         """
                     } catch (Exception e) {
@@ -103,16 +104,39 @@ pipeline {
                         ])
 
                         // Cucumber Report
-                        cucumber(
+                        cucumber([
                             fileIncludePattern: '**/cucumber.json',
-                            jsonReportDirectory: 'target',
-                            reportTitle: 'Planity Test Report',
+                            sortingMethod: 'ALPHABETICAL',
+                            reportTitle: '🌟 Planity Test Automation',
+                            buildStatus: 'UNSTABLE',
+                            trendsLimit: 10,
                             classifications: [
-                                [key: 'Branch', value: params.BRANCH_NAME],
-                                [key: 'Platform', value: params.PLATFORM_NAME],
-                                [key: 'Browser', value: params.BROWSER]
+                                [
+                                    key: '🌿 Branch',
+                                    value: params.BRANCH_NAME
+                                ],
+                                [
+                                    key: '📱 Plateforme',
+                                    value: params.PLATFORM_NAME
+                                ],
+                                [
+                                    key: '🌐 Navigateur',
+                                    value: params.BROWSER
+                                ],
+                                [
+                                    key: '🔄 Build',
+                                    value: "#${BUILD_NUMBER}"
+                                ],
+                                [
+                                    key: '📅 Date',
+                                    value: new Date().format('dd/MM/yyyy HH:mm')
+                                ],
+                                [
+                                    key: '🔗 Jenkins URL',
+                                    value: "${BUILD_URL}"
+                                ]
                             ]
-                        )
+                        ])
 
                         // Arşivleme
                         sh """
@@ -163,14 +187,14 @@ pipeline {
 📱 Plateforme: ${params.PLATFORM_NAME}
 🌐 Navigateur: ${params.BROWSER}
 
-📊 Rapports:
+📊 Rapports Disponibles:
 🔹 Allure:    ${BUILD_URL}allure/
-🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
+🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/overview-features.html
 🔹 Artifacts: ${BUILD_URL}artifact/
 
-📝 Test Results:
-- Nombre de fichiers de test: ${testCount}
-- Résultat final: ${status}
+📝 Résultats des Tests:
+- Nombre de fichiers: ${testCount}
+- Statut final: ${status}
 
 ${emoji} Statut Final: ${status}
 """
@@ -192,7 +216,10 @@ ${emoji} Statut Final: ${status}
         }
 
         cleanup {
-            deleteDir()
+            cleanWs(cleanWhenNotBuilt: false,
+                   deleteDirs: true,
+                   disableDeferredWipeout: true,
+                   notFailBuild: true)
         }
     }
 }
