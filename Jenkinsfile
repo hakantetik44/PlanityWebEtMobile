@@ -15,15 +15,13 @@ pipeline {
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
         ALLURE_RESULTS = 'target/allure-results'
-        PDF_REPORTS = 'target/pdf-reports'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
-        VIDEO_DIR = "${PDF_REPORTS}/videos"
     }
 
     parameters {
         choice(
             name: 'BRANCH_NAME',
-            choices: ['main', 'dev', 'feature/*', 'bugfix/*'],
+            choices: ['main', 'hakan'],
             description: 'Sélectionnez la branche à tester'
         )
         choice(
@@ -36,11 +34,6 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
-        booleanParam(
-            name: 'RECORD_VIDEO',
-            defaultValue: true,
-            description: 'Activer l\'enregistrement vidéo'
-        )
     }
 
     stages {
@@ -49,12 +42,11 @@ pipeline {
                 script {
                     // Mevcut branch'leri getir
                     sh "git fetch --all"
-                    def branches = sh(
+                    def branchOutput = sh(
                         script: 'git branch -r | grep -v HEAD | sed "s/origin\\///"',
                         returnStdout: true
-                    ).trim().split('\n')
-
-                    echo "🌿 Available branches: ${branches.join(', ')}"
+                    ).trim()
+                    echo "🌿 Available branches: ${branchOutput}"
 
                     // Seçilen branch'e geç
                     checkout([
@@ -67,69 +59,29 @@ pipeline {
             }
         }
 
-        stage('Initialisation') {
+        stage('Test Environment Setup') {
             steps {
                 script {
-                    echo """╔═══════════════════════════════╗
-║ Démarrage de l'Automatisation ║
-╚═══════════════════════════════╝"""
-
-                    // Create directories
                     sh """
-                        mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${PDF_REPORTS}
+                        mkdir -p ${ALLURE_RESULTS}
+                        mkdir -p ${CUCUMBER_REPORTS}
                         mkdir -p target/screenshots
-                        chmod -R 777 ${VIDEO_DIR}
-                    """
-
-                    // Install ffmpeg if not present (for video recording)
-                    sh """
-                        if ! command -v ffmpeg &> /dev/null; then
-                            brew install ffmpeg || apt-get install -y ffmpeg || yum install -y ffmpeg
-                        fi
                     """
                 }
             }
         }
 
-        stage('Construction') {
-            steps {
-                script {
-                    try {
-                        echo "📦 Installation des dépendances..."
-                        sh "${M2_HOME}/bin/mvn clean install -DskipTests -B"
-                    } catch (Exception e) {
-                        currentBuild.result = 'FAILURE'
-                        throw e
-                    }
-                }
-            }
-        }
-
-        stage('Exécution des Tests') {
+        stage('Run Tests') {
             steps {
                 script {
                     try {
                         echo "🧪 Lancement des tests..."
 
-                        if (params.RECORD_VIDEO) {
-                            // Start video recording with timestamp
-                            echo "🎥 Démarrage de l'enregistrement vidéo..."
-                            sh """
-                                DISPLAY=:0 ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
-                                -codec:v libx264 -r 30 -pix_fmt yuv420p \
-                                ${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4 \
-                                2>${PDF_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
-                            """
-                        }
-
-                        // Run tests
                         sh """
                             ${M2_HOME}/bin/mvn test \
                             -Dtest=runner.TestRunner \
                             -DplatformName=${params.PLATFORM_NAME} \
                             -Dbrowser=${params.BROWSER} \
-                            -DvideoDir=${VIDEO_DIR} \
-                            -DrecordVideo=${params.RECORD_VIDEO} \
                             -DscreenshotsDir=target/screenshots \
                             -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -Dallure.results.directory=${ALLURE_RESULTS}
@@ -137,33 +89,13 @@ pipeline {
 
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
-                        throw e
-                    } finally {
-                        if (params.RECORD_VIDEO) {
-                            // Stop video recording
-                            echo "🎥 Arrêt de l'enregistrement vidéo..."
-                            sh """
-                                if [ -f "${VIDEO_DIR}/recording.pid" ]; then
-                                    kill \$(cat ${VIDEO_DIR}/recording.pid) || true
-                                    rm ${VIDEO_DIR}/recording.pid
-                                fi
-                            """
-                            // Check if video was created
-                            sh """
-                                if [ -f "${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4" ]; then
-                                    echo "✅ Vidéo enregistrée avec succès"
-                                    ls -lh ${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4
-                                else
-                                    echo "❌ Échec de l'enregistrement vidéo"
-                                fi
-                            """
-                        }
+                        error("Test execution failed: ${e.message}")
                     }
                 }
             }
         }
 
-        stage('Rapports') {
+        stage('Reports') {
             steps {
                 script {
                     try {
@@ -182,8 +114,7 @@ pipeline {
                             classifications: [
                                 ['key': '🌿 Branch', 'value': params.BRANCH_NAME],
                                 ['key': '🚀 Platform', 'value': params.PLATFORM_NAME],
-                                ['key': '🌐 Browser', 'value': params.BROWSER],
-                                ['key': '🎥 Video', 'value': params.RECORD_VIDEO ? 'Enabled' : 'Disabled']
+                                ['key': '🌐 Browser', 'value': params.BROWSER]
                             ]
 
                         // Archive test results
@@ -192,13 +123,10 @@ pipeline {
                             zip -r test-results-${BUILD_NUMBER}.zip \
                                 allure-results/ \
                                 cucumber-reports/ \
-                                screenshots/ \
-                                ${params.RECORD_VIDEO ? 'pdf-reports/videos/' : ''}
+                                screenshots/
                         """
 
-                        // Archive artifacts
                         archiveArtifacts artifacts: """
-                            ${VIDEO_DIR}/**/*.mp4,
                             target/test-results-${BUILD_NUMBER}.zip,
                             target/cucumber.json
                         """, allowEmptyArchive: true
@@ -227,19 +155,26 @@ pipeline {
 🕒 Durée: ${currentBuild.durationString}
 📱 Plateforme: ${params.PLATFORM_NAME}
 🌐 Navigateur: ${params.BROWSER}
-🎥 Video: ${params.RECORD_VIDEO ? 'Activé' : 'Désactivé'}
 
 📊 Rapports:
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
-🔹 Video:     ${BUILD_URL}artifact/${VIDEO_DIR}/
 
 ${statusEmoji} Statut Final: ${status}
 """
-
-                // Cleanup
-                cleanWs(patterns: [[pattern: 'target/classes/', type: 'INCLUDE']])
             }
+        }
+
+        success {
+            echo '✅ Tests completed successfully!'
+        }
+
+        failure {
+            echo '❌ Tests failed!'
+        }
+
+        cleanup {
+            cleanWs()
         }
     }
 }
