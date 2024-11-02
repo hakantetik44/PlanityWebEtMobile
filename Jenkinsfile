@@ -108,7 +108,7 @@ pipeline {
                             -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn
                         """
 
-                        sh mvnCommand
+                        sh "${mvnCommand}"
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         archiveArtifacts artifacts: "${SCREENSHOT_FOLDER}/**/*.png", allowEmptyArchive: true
