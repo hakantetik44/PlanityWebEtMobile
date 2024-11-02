@@ -67,30 +67,33 @@ pipeline {
             }
         }
 
-        stage('Initialisation') {
-            steps {
-                script {
-                    echo """╔═══════════════════════════════╗
-║ Démarrage de l'Automatisation ║
-╚═══════════════════════════════╝"""
+      stage('Initialisation') {
+          steps {
+              script {
+                  echo """╔═══════════════════════════════╗
+      ║ Démarrage de l'Automatisation ║
+      ╚═══════════════════════════════╝"""
 
-                    // Create directories
-                    sh """
-                        mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${PDF_REPORTS}
-                        mkdir -p target/screenshots
-                        chmod -R 777 ${VIDEO_DIR}
-                    """
+                  // Create directories and set permissions
+                  sh """
+                      mkdir -p ${PDF_REPORTS}/videos
+                      mkdir -p ${ALLURE_RESULTS}
+                      mkdir -p ${CUCUMBER_REPORTS}
+                      mkdir -p target/screenshots
+                      touch ${PDF_REPORTS}/ffmpeg.log
+                      chmod -R 777 ${PDF_REPORTS}
+                      chmod 777 ${PDF_REPORTS}/ffmpeg.log
+                  """
 
-                    // Install ffmpeg if not present (for video recording)
-                    sh """
-                        if ! command -v ffmpeg &> /dev/null; then
-                            brew install ffmpeg || apt-get install -y ffmpeg || yum install -y ffmpeg
-                        fi
-                    """
-                }
-            }
-        }
-
+                  // Check ffmpeg installation
+                  sh """
+                      if ! command -v ffmpeg &> /dev/null; then
+                          brew install ffmpeg || apt-get install -y ffmpeg || yum install -y ffmpeg
+                      fi
+                  """
+              }
+          }
+      }
         stage('Construction') {
             steps {
                 script {
@@ -105,64 +108,74 @@ pipeline {
             }
         }
 
-        stage('Exécution des Tests') {
-            steps {
-                script {
-                    try {
-                        echo "🧪 Lancement des tests..."
+       stage('Exécution des Tests') {
+           steps {
+               script {
+                   try {
+                       echo "🧪 Lancement des tests..."
 
-                        if (params.RECORD_VIDEO) {
-                            // Start video recording with timestamp
-                            echo "🎥 Démarrage de l'enregistrement vidéo..."
-                            sh """
-                                DISPLAY=:0 ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
-                                -codec:v libx264 -r 30 -pix_fmt yuv420p \
-                                ${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4 \
-                                2>${PDF_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
-                            """
-                        }
+                       if (params.RECORD_VIDEO) {
+                           // Start video recording with timestamp
+                           echo "🎥 Démarrage de l'enregistrement vidéo..."
+                           sh """
+                               # Ensure directories exist
+                               mkdir -p ${PDF_REPORTS}/videos
+                               touch ${PDF_REPORTS}/ffmpeg.log
 
-                        // Run tests
-                        sh """
-                            ${M2_HOME}/bin/mvn test \
-                            -Dtest=runner.TestRunner \
-                            -DplatformName=${params.PLATFORM_NAME} \
-                            -Dbrowser=${params.BROWSER} \
-                            -DvideoDir=${VIDEO_DIR} \
-                            -DrecordVideo=${params.RECORD_VIDEO} \
-                            -DscreenshotsDir=target/screenshots \
-                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-                            -Dallure.results.directory=${ALLURE_RESULTS}
-                        """
+                               # Start recording
+                               DISPLAY=:0 ffmpeg -y -f x11grab -video_size 1920x1080 -i :0.0 \
+                               -codec:v libx264 -r 30 -pix_fmt yuv420p \
+                               ${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4 \
+                               2>${PDF_REPORTS}/ffmpeg.log & \
+                               echo \$! > ${PDF_REPORTS}/videos/recording.pid
 
-                    } catch (Exception e) {
-                        currentBuild.result = 'FAILURE'
-                        throw e
-                    } finally {
-                        if (params.RECORD_VIDEO) {
-                            // Stop video recording
-                            echo "🎥 Arrêt de l'enregistrement vidéo..."
-                            sh """
-                                if [ -f "${VIDEO_DIR}/recording.pid" ]; then
-                                    kill \$(cat ${VIDEO_DIR}/recording.pid) || true
-                                    rm ${VIDEO_DIR}/recording.pid
-                                fi
-                            """
-                            // Check if video was created
-                            sh """
-                                if [ -f "${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4" ]; then
-                                    echo "✅ Vidéo enregistrée avec succès"
-                                    ls -lh ${VIDEO_DIR}/test_execution_${TIMESTAMP}.mp4
-                                else
-                                    echo "❌ Échec de l'enregistrement vidéo"
-                                fi
-                            """
-                        }
-                    }
-                }
-            }
-        }
+                               # Wait a moment to ensure recording starts
+                               sleep 2
+                           """
+                       }
 
+                       // Run tests
+                       sh """
+                           ${M2_HOME}/bin/mvn test \
+                           -Dtest=runner.TestRunner \
+                           -DplatformName=${params.PLATFORM_NAME} \
+                           -Dbrowser=${params.BROWSER} \
+                           -DvideoDir=${PDF_REPORTS}/videos \
+                           -DrecordVideo=${params.RECORD_VIDEO} \
+                           -DscreenshotsDir=target/screenshots \
+                           -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
+                           -Dallure.results.directory=${ALLURE_RESULTS}
+                       """
+
+                   } catch (Exception e) {
+                       currentBuild.result = 'FAILURE'
+                       throw e
+                   } finally {
+                       if (params.RECORD_VIDEO) {
+                           // Stop video recording
+                           echo "🎥 Arrêt de l'enregistrement vidéo..."
+                           sh """
+                               if [ -f "${PDF_REPORTS}/videos/recording.pid" ]; then
+                                   PID=\$(cat ${PDF_REPORTS}/videos/recording.pid)
+                                   kill \$PID || true
+                                   rm ${PDF_REPORTS}/videos/recording.pid
+                               fi
+
+                               # Check video file
+                               sleep 2
+                               if [ -f "${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4" ]; then
+                                   echo "✅ Vidéo enregistrée avec succès"
+                                   ls -lh ${PDF_REPORTS}/videos/test_execution_${TIMESTAMP}.mp4
+                               else
+                                   echo "❌ Échec de l'enregistrement vidéo"
+                                   cat ${PDF_REPORTS}/ffmpeg.log
+                               fi
+                           """
+                       }
+                   }
+               }
+           }
+       }
         stage('Rapports') {
             steps {
                 script {
