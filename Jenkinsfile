@@ -154,14 +154,15 @@ pipeline {
                 def testCount = testResults.toInteger()
 
                 echo """╔═══════════════════════════════════════════╗
-║             Résumé d'Exécution              ║
+║              🌟 Résumé d'Exécution          ║
 ╚═══════════════════════════════════════════╝
 
-🎯 Build: #${BUILD_NUMBER}
+🔄 Build: #${BUILD_NUMBER}
 🌿 Branch: ${params.BRANCH_NAME}
-🕒 Durée: ${currentBuild.durationString}
 📱 Plateforme: ${params.PLATFORM_NAME}
 🌐 Navigateur: ${params.BROWSER}
+📅 Date: ${new Date().format('dd/MM/yyyy HH:mm')}
+🔗 Jenkins URL: ${env.BUILD_URL}
 
 📊 Rapports:
 🔹 Allure:    ${BUILD_URL}allure/
