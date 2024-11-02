@@ -200,7 +200,10 @@ pipeline {
 • Enregistrement Vidéo: ${params.RECORD_VIDEO}
 • Build: #${BUILD_NUMBER}
 
-${status == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
+${status == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}
+
+🎥 **Video Dosyaları:** ${BUILD_URL}artifact/${VIDEO_FOLDER}/
+"""
 
                 echo summary
 
