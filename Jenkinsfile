@@ -14,8 +14,12 @@ pipeline {
         MAVEN_OPTS = '-Xmx3072m'
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
+        WORKSPACE_DIR = pwd()
         ALLURE_RESULTS = 'target/allure-results'
-        CUCUMBER_REPORTS = 'target/cucumber-reports'
+        CUCUMBER_RESULTS = 'target/cucumber-reports'
+        CUCUMBER_JSON = 'target/cucumber.json'
+        SCREENSHOTS_DIR = 'target/screenshots'
+        TEST_RESULTS = 'target/surefire-reports'
     }
 
     parameters {
@@ -34,106 +38,188 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
+        booleanParam(
+            name: 'RETRY_FAILED_TESTS',
+            defaultValue: true,
+            description: 'Réessayer les tests échoués'
+        )
+        string(
+            name: 'MAX_RETRY_COUNT',
+            defaultValue: '2',
+            description: 'Nombre maximum de tentatives pour les tests échoués'
+        )
     }
 
     stages {
-        stage('Branch Selection') {
+        stage('Initialization') {
             steps {
                 script {
-                    // Mevcut branch'leri getir
-                    sh "git fetch --all"
-                    def branchOutput = sh(
-                        script: 'git branch -r | grep -v HEAD | sed "s/origin\\///"',
-                        returnStdout: true
-                    ).trim()
-                    echo "🌿 Available branches: ${branchOutput}"
+                    // Temizlik ve hazırlık
+                    cleanWs()
 
-                    // Seçilen branch'e geç
+                    // Git checkout
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
-                        extensions: [],
+                        extensions: [
+                            [$class: 'CleanBeforeCheckout'],
+                            [$class: 'CloneOption', depth: 1, noTags: true, reference: '', shallow: true]
+                        ],
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
-                }
-            }
-        }
 
-        stage('Test Environment Setup') {
-            steps {
-                script {
+                    // Klasör yapısı oluşturma
                     sh """
                         mkdir -p ${ALLURE_RESULTS}
-                        mkdir -p ${CUCUMBER_REPORTS}
-                        mkdir -p target/screenshots
+                        mkdir -p ${CUCUMBER_RESULTS}
+                        mkdir -p ${SCREENSHOTS_DIR}
+                        mkdir -p ${TEST_RESULTS}
+
+                        echo "Build Info:" > ${WORKSPACE_DIR}/build-info.txt
+                        echo "Build Number: ${BUILD_NUMBER}" >> ${WORKSPACE_DIR}/build-info.txt
+                        echo "Branch: ${params.BRANCH_NAME}" >> ${WORKSPACE_DIR}/build-info.txt
+                        echo "Platform: ${params.PLATFORM_NAME}" >> ${WORKSPACE_DIR}/build-info.txt
+                        echo "Browser: ${params.BROWSER}" >> ${WORKSPACE_DIR}/build-info.txt
+                        echo "Timestamp: ${TIMESTAMP}" >> ${WORKSPACE_DIR}/build-info.txt
                     """
                 }
             }
         }
 
-        stage('Run Tests') {
+        stage('Build & Dependencies') {
             steps {
                 script {
                     try {
-                        echo "🧪 Lancement des tests..."
-
+                        echo "📦 Installation des dépendances..."
                         sh """
-                            ${M2_HOME}/bin/mvn test \
-                            -Dtest=runner.TestRunner \
-                            -DplatformName=${params.PLATFORM_NAME} \
-                            -Dbrowser=${params.BROWSER} \
-                            -DscreenshotsDir=target/screenshots \
-                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
+                            ${M2_HOME}/bin/mvn clean install -DskipTests \
+                            -Dmaven.test.failure.ignore=true \
+                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON},html:${CUCUMBER_RESULTS}" \
                             -Dallure.results.directory=${ALLURE_RESULTS}
                         """
-
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
-                        error("Test execution failed: ${e.message}")
+                        error "❌ Erreur lors de l'installation des dépendances: ${e.message}"
                     }
                 }
             }
         }
 
-        stage('Reports') {
+        stage('Test Execution') {
             steps {
                 script {
                     try {
+                        echo "🧪 Lancement des tests..."
+
+                        def maxRetries = params.RETRY_FAILED_TESTS ? params.MAX_RETRY_COUNT.toInteger() : 0
+                        def success = false
+                        def attempt = 0
+
+                        while (!success && attempt <= maxRetries) {
+                            attempt++
+                            echo "📋 Tentative ${attempt}/${maxRetries + 1}"
+
+                            try {
+                                sh """
+                                    ${M2_HOME}/bin/mvn test \
+                                    -Dtest=runner.TestRunner \
+                                    -DplatformName=${params.PLATFORM_NAME} \
+                                    -Dbrowser=${params.BROWSER} \
+                                    -DscreenshotsDir=${SCREENSHOTS_DIR} \
+                                    -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON},html:${CUCUMBER_RESULTS}" \
+                                    -Dallure.results.directory=${ALLURE_RESULTS} \
+                                    -Dmaven.test.failure.ignore=true
+                                """
+
+                                // Verify cucumber.json exists and is valid
+                                if (fileExists(CUCUMBER_JSON)) {
+                                    def jsonContent = readFile(CUCUMBER_JSON)
+                                    if (jsonContent.trim()) {
+                                        success = true
+                                    } else {
+                                        error "Cucumber JSON file is empty"
+                                    }
+                                } else {
+                                    error "Cucumber JSON file not created"
+                                }
+
+                            } catch (Exception e) {
+                                if (attempt > maxRetries) {
+                                    throw e
+                                }
+                                echo "⚠️ Tentative ${attempt} échouée, nouvelle tentative..."
+                            }
+                        }
+
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        error "❌ Erreur lors de l'exécution des tests: ${e.message}"
+                    }
+                }
+            }
+            post {
+                always {
+                    // Collect and save test results
+                    junit allowEmptyResults: true, testResults: '**/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('Generate Reports') {
+            steps {
+                script {
+                    try {
+                        // Validate Cucumber JSON
+                        if (fileExists(CUCUMBER_JSON)) {
+                            def jsonContent = readFile(CUCUMBER_JSON)
+                            if (!jsonContent.trim()) {
+                                error "Cucumber JSON file is empty"
+                            }
+                        } else {
+                            error "Cucumber JSON file not found"
+                        }
+
                         // Allure Report
                         allure([
                             includeProperties: true,
+                            jdk: '',
+                            properties: [],
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
                         // Cucumber Report
                         cucumber buildStatus: 'UNSTABLE',
-                            reportTitle: '🌟 Planity Test Automation Report',
-                            fileIncludePattern: '**/cucumber.json',
-                            trendsLimit: 10,
-                            classifications: [
-                                ['key': '🌿 Branch', 'value': params.BRANCH_NAME],
-                                ['key': '🚀 Platform', 'value': params.PLATFORM_NAME],
-                                ['key': '🌐 Browser', 'value': params.BROWSER]
-                            ]
+                            failedFeaturesNumber: -1,
+                            failedScenariosNumber: -1,
+                            failedStepsNumber: -1,
+                            fileIncludePattern: '**/*.json',
+                            jsonReportDirectory: 'target',
+                            pendingStepsNumber: -1,
+                            skippedStepsNumber: -1,
+                            sortingMethod: 'ALPHABETICAL',
+                            undefinedStepsNumber: -1
 
-                        // Archive test results
+                        // Archive test results and reports
                         sh """
-                            cd target
+                            cd ${WORKSPACE_DIR}/target
                             zip -r test-results-${BUILD_NUMBER}.zip \
                                 allure-results/ \
                                 cucumber-reports/ \
-                                screenshots/
+                                screenshots/ \
+                                surefire-reports/ \
+                                cucumber.json
                         """
 
                         archiveArtifacts artifacts: """
                             target/test-results-${BUILD_NUMBER}.zip,
-                            target/cucumber.json
+                            target/cucumber.json,
+                            build-info.txt
                         """, allowEmptyArchive: true
 
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Erreur rapports: ${e.message}"
+                        echo "⚠️ Erreur lors de la génération des rapports: ${e.message}"
                     }
                 }
             }
@@ -145,6 +231,12 @@ pipeline {
             script {
                 def status = currentBuild.result ?: 'SUCCESS'
                 def statusEmoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
+
+                // Test Results Analysis
+                def testResults = []
+                if (fileExists('target/surefire-reports')) {
+                    testResults = findFiles(glob: 'target/surefire-reports/*.xml')
+                }
 
                 echo """╔═══════════════════════════════════════════╗
 ║             Résumé d'Exécution              ║
@@ -159,22 +251,33 @@ pipeline {
 📊 Rapports:
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
+🔹 Artifacts: ${BUILD_URL}artifact/
+
+📝 Test Results:
+- Nombre de fichiers de test: ${testResults.size()}
+- Résultat final: ${status}
 
 ${statusEmoji} Statut Final: ${status}
 """
+
+                // Cleanup workspace but keep reports
+                sh """
+                    find . -type f -name "*.tmp" -delete
+                    find . -type d -name "node_modules" -exec rm -rf {} +
+                """
             }
         }
 
         success {
-            echo '✅ Tests completed successfully!'
+            echo '✅ Pipeline completed successfully!'
         }
 
         failure {
-            echo '❌ Tests failed!'
+            echo '❌ Pipeline failed!'
         }
 
-        cleanup {
-            cleanWs()
+        unstable {
+            echo '⚠️ Pipeline is unstable!'
         }
     }
 }
