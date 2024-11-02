@@ -141,23 +141,6 @@ pipeline {
                 }
             }
         }
-
-        stage('Generate Excel Report') {
-            steps {
-                script {
-                    // List files in target directory for debugging
-                    sh 'ls -la target/'
-
-                    // Attempt to generate Excel report
-                    try {
-                        sh 'java -cp target/myapp.jar com.example.ExcelReportGenerator target/test-report.xlsx'
-                    } catch (Exception e) {
-                        currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Excel report generation error: ${e.message}"
-                    }
-                }
-            }
-        }
     }
 
     post {
@@ -186,7 +169,6 @@ pipeline {
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
 🔹 Artifacts: ${BUILD_URL}artifact/
-🔹 Excel Report: ${BUILD_URL}target/test-report.xlsx
 
 📝 Test Results:
 - 📁 Nombre de fichiers de test: ${testCount}
