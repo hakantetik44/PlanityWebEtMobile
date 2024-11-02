@@ -18,7 +18,6 @@ pipeline {
         EXCEL_REPORTS = 'target/rapports-tests'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         VIDEO_FOLDER = 'target/videos'
-        SCREENSHOT_FOLDER = 'target/screenshots'
     }
 
     parameters {
@@ -32,17 +31,6 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
-        booleanParam(
-            name: 'RECORD_VIDEO',
-            defaultValue: true,
-            description: 'Activer l\'enregistrement vidéo'
-        )
-    }
-
-    options {
-        timestamps()
-        ansiColor('xterm')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     stages {
@@ -53,24 +41,41 @@ pipeline {
                     cleanWs()
                     checkout scm
 
+                    if (fileExists('src/test/resources/configuration.properties')) {
+                        def configContent = sh(
+                            script: 'cat src/test/resources/configuration.properties',
+                            returnStdout: true
+                        ).trim()
+
+                        def props = configContent.split('\n').collectEntries { line ->
+                            def parts = line.split('=')
+                            if (parts.size() == 2) {
+                                [(parts[0].trim()): parts[1].trim()]
+                            } else {
+                                [:]
+                            }
+                        }
+
+                        env.PLATFORM_NAME = props.platformName ?: params.PLATFORM_NAME ?: 'Web'
+                        env.BROWSER = env.PLATFORM_NAME == 'Web' ? (props.browser ?: params.BROWSER ?: 'chrome') : ''
+
+                        writeFile file: 'target/allure-results/environment.properties', text: """
+                            Platform=${env.PLATFORM_NAME}
+                            Browser=${env.BROWSER}
+                            Test Framework=Cucumber
+                            Language=FR
+                        """.stripIndent()
+                    }
+
+                    echo """Configuration:
+                    • Plateforme: ${env.PLATFORM_NAME}
+                    • Navigateur: ${env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'}"""
+
                     sh """
-                        mkdir -p ${EXCEL_REPORTS} ${ALLURE_RESULTS} ${VIDEO_FOLDER} ${SCREENSHOT_FOLDER}
+                        mkdir -p ${EXCEL_REPORTS} ${ALLURE_RESULTS} ${VIDEO_FOLDER} target/screenshots
                         export JAVA_HOME=${JAVA_HOME}
                         java -version
                         ${M2_HOME}/bin/mvn -version
-                    """
-
-                    writeFile file: 'src/test/resources/config.properties', text: """
-                        platformName=${params.PLATFORM_NAME}
-                        browser=${params.BROWSER}
-                        recordVideo=${params.RECORD_VIDEO}
-                        videoFolder=${VIDEO_FOLDER}
-                        screenshotFolder=${SCREENSHOT_FOLDER}
-                        allureResultsDir=${ALLURE_RESULTS}
-                        testEnvironment=Jenkins
-                        buildNumber=${BUILD_NUMBER}
-                        rerunFailedTests=true
-                        maxRetryCount=2
                     """
                 }
             }
@@ -81,7 +86,7 @@ pipeline {
                 script {
                     try {
                         echo "📦 Installation des dépendances..."
-                        sh "${M2_HOME}/bin/mvn clean install -DskipTests"
+                        sh "${M2_HOME}/bin/mvn clean install -DskipTests -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn"
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         throw e
@@ -96,22 +101,31 @@ pipeline {
                     try {
                         echo "🧪 Lancement des tests..."
 
-                        def mvnCommand = """
-                            ${M2_HOME}/bin/mvn test \
-                            -Dtest=runner.TestRunner \
-                            -DplatformName=${params.PLATFORM_NAME} \
-                            -Dbrowser=${params.BROWSER} \
-                            -DrecordVideo=${params.RECORD_VIDEO} \
-                            -DvideoFolder=${VIDEO_FOLDER} \
-                            -DscreenshotFolder=${SCREENSHOT_FOLDER} \
-                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-                            -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn
+                        // Start video recording if the platform is set to support it
+                        if (env.PLATFORM_NAME == 'Android' || env.PLATFORM_NAME == 'iOS') {
+                            sh "start-video-recording.sh ${VIDEO_FOLDER}" // Custom script to start recording
+                        }
+
+                        def mvnCommand = "${M2_HOME}/bin/mvn test -Dtest=runner.TestRunner -DplatformName=${env.PLATFORM_NAME}"
+
+                        if (env.PLATFORM_NAME == 'Web') {
+                            mvnCommand += " -Dbrowser=${env.BROWSER}"
+                        }
+
+                        mvnCommand += """ \
+                            -Dcucumber.plugin="pretty,json:target/cucumber.json,io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
+                            -B -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn > test_output.log
                         """
 
-                        sh "${mvnCommand}"
+                        sh mvnCommand
+
+                        // Stop video recording if started
+                        if (env.PLATFORM_NAME == 'Android' || env.PLATFORM_NAME == 'iOS') {
+                            sh "stop-video-recording.sh ${VIDEO_FOLDER}" // Custom script to stop recording
+                        }
+
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
-                        archiveArtifacts artifacts: "${SCREENSHOT_FOLDER}/**/*.png", allowEmptyArchive: true
                         throw e
                     }
                 }
@@ -122,40 +136,45 @@ pipeline {
             steps {
                 script {
                     try {
-                        echo "📊 Génération des rapports..."
-
-                        // Zip video files if the folder exists
-                        sh """
-                            if [ -d "${VIDEO_FOLDER}" ]; then
-                                cd target && zip -r test-execution-videos.zip videos/
-                            fi
-                        """
-
-                        // Allure Reports
                         allure([
                             includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        // Cucumber Reports
                         cucumber buildStatus: 'UNSTABLE',
                             reportTitle: 'Planity Test Automation Report',
                             fileIncludePattern: '**/cucumber.json',
                             trendsLimit: 10,
                             classifications: [
-                                ['key': 'Platform', 'value': params.PLATFORM_NAME],
-                                ['key': 'Browser', 'value': params.BROWSER],
-                                ['key': 'Environment', 'value': 'Jenkins'],
-                                ['key': 'Build', 'value': BUILD_NUMBER]
+                                [
+                                    'key': 'Platform',
+                                    'value': env.PLATFORM_NAME
+                                ],
+                                [
+                                    'key': 'Browser',
+                                    'value': env.PLATFORM_NAME == 'Web' ? env.BROWSER : 'N/A'
+                                ],
+                                [
+                                    'key': 'Jenkins Job',
+                                    'value': env.JOB_NAME
+                                ],
+                                [
+                                    'key': 'Build',
+                                    'value': env.BUILD_NUMBER
+                                ]
                             ]
 
-                        // Create report archives
                         sh """
-                            cd target
-                            zip -r allure-report.zip allure-results/
-                            zip -r cucumber-reports.zip cucumber-reports/
-                            zip -r screenshots.zip screenshots/
+                            if [ -d "${ALLURE_RESULTS}" ]; then
+                                cd target && zip -q -r allure-report.zip allure-results/
+                            fi
+                            if [ -d "${CUCUMBER_REPORTS}" ]; then
+                                cd target && zip -q -r cucumber-reports.zip cucumber-reports/
+                            fi
+                            if [ -d "${VIDEO_FOLDER}" ]; then
+                                cd target && zip -q -r test-videos.zip ${VIDEO_FOLDER}/
+                            fi
                         """
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
@@ -169,10 +188,7 @@ pipeline {
                         target/allure-report.zip,
                         target/cucumber-reports.zip,
                         target/cucumber.json,
-                        target/test-execution-videos.zip,
-                        target/screenshots.zip,
-                        ${VIDEO_FOLDER}/**/*.mp4,
-                        ${SCREENSHOT_FOLDER}/**/*.png
+                        target/test-videos.zip
                     """, allowEmptyArchive: true
                 }
             }
@@ -182,51 +198,23 @@ pipeline {
     post {
         always {
             script {
-                def status = currentBuild.result ?: 'SUCCESS'
-                def summary = """╔═══════════════════════════╗
+                def testResults = fileExists('test_output.log') ? readFile('test_output.log').trim() : "Aucun résultat disponible"
+
+                echo """╔═══════════════════════════╗
 ║   Résumé de l'Exécution   ║
 ╚═══════════════════════════╝
 
 📝 Rapports:
 • Allure: ${BUILD_URL}allure/
 • Cucumber: ${BUILD_URL}cucumber-html-reports/overview-features.html
-• Vidéos: ${BUILD_URL}artifact/target/test-execution-videos.zip
-• Screenshots: ${BUILD_URL}artifact/target/screenshots.zip
 • Excel: ${BUILD_URL}artifact/${EXCEL_REPORTS}/
+• Vidéos: ${BUILD_URL}artifact/target/test-videos.zip
 
-🔍 Configuration:
-• Plateforme: ${params.PLATFORM_NAME}
-• Navigateur: ${params.BROWSER}
-• Enregistrement Vidéo: ${params.RECORD_VIDEO}
-• Build: #${BUILD_NUMBER}
-
-${status == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}
-
-🎥 **Video Dosyaları:** ${BUILD_URL}artifact/${VIDEO_FOLDER}/
-"""
-
-                echo summary
-
-                // Clean workspace but keep reports
-                sh """
-                    if [ -d "target" ]; then
-                        find target -type f ! -name '*.zip' ! -name '*.xlsx' ! -name '*.json' ! -name '*.mp4' ! -name '*.png' -delete
-                    fi
-                """
+Plateforme: ${env.PLATFORM_NAME}
+${env.PLATFORM_NAME == 'Web' ? "Navigateur: ${env.BROWSER}" : ''}
+${currentBuild.result == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
             }
-        }
-        failure {
-            echo "❌ Des échecs ont été détectés. Consultez les rapports pour plus de détails."
-        }
-        cleanup {
-            cleanWs(
-                deleteDirs: true,
-                patterns: [
-                    [pattern: 'target/classes/', type: 'INCLUDE'],
-                    [pattern: 'target/test-classes/', type: 'INCLUDE'],
-                    [pattern: '**/.git/', type: 'INCLUDE']
-                ]
-            )
+            cleanWs notFailBuild: true
         }
     }
 }
