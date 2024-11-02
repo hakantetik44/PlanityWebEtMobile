@@ -15,9 +15,9 @@ pipeline {
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
         ALLURE_RESULTS = 'target/allure-results'
-        EXCEL_REPORTS = 'target/rapports-tests'
+        PDF_REPORTS = 'target/pdf-reports'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
-        VIDEO_DIR = "${EXCEL_REPORTS}/videos"
+        VIDEO_DIR = "${PDF_REPORTS}/videos"
     }
 
     parameters {
@@ -42,13 +42,27 @@ pipeline {
                     checkout scm
 
                     sh """
-                        mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS}
+                        mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${PDF_REPORTS}
                         mkdir -p target/screenshots
                         chmod -R 777 ${VIDEO_DIR}
+                        npm install -g markdown-pdf
                         export JAVA_HOME=${JAVA_HOME}
                         java -version
                         ${M2_HOME}/bin/mvn -version
                     """
+
+                    // Crée le fichier markdown pour le rapport
+                    writeFile file: 'test-report.md', text: """
+# Test Execution Report ${BUILD_NUMBER}
+## ${new Date().format('dd/MM/yyyy HH:mm')}
+
+### Configuration
+- Platform: ${params.PLATFORM_NAME}
+- Browser: ${params.BROWSER}
+- Build: #${BUILD_NUMBER}
+
+### Test Steps:
+"""
                 }
             }
         }
@@ -59,7 +73,11 @@ pipeline {
                     try {
                         echo "📦 Installation des dépendances..."
                         sh "${M2_HOME}/bin/mvn clean install -DskipTests -B"
+
+                        // Ajoute l'étape au rapport
+                        sh "echo '✅ Construction: Installation des dépendances réussie' >> test-report.md"
                     } catch (Exception e) {
+                        sh "echo '❌ Construction: Échec de l'installation des dépendances' >> test-report.md"
                         currentBuild.result = 'FAILURE'
                         throw e
                     }
@@ -73,15 +91,14 @@ pipeline {
                     try {
                         echo "🧪 Lancement des tests..."
 
-                        // Démarre l'enregistrement vidéo
                         sh """
+                            echo "### Video Recording Started" >> test-report.md
                             ffmpeg -f x11grab -video_size 1920x1080 -i :0.0 \
                             -codec:v libx264 -r 30 -pix_fmt yuv420p \
                             ${VIDEO_DIR}/test_execution_${BUILD_NUMBER}.mp4 \
-                            2>${EXCEL_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
+                            2>${PDF_REPORTS}/ffmpeg.log & echo \$! > ${VIDEO_DIR}/recording.pid
                         """
 
-                        // Exécute les tests
                         sh """
                             ${M2_HOME}/bin/mvn test \
                             -Dtest=runner.TestRunner \
@@ -93,7 +110,9 @@ pipeline {
                             -Dallure.results.directory=${ALLURE_RESULTS}
                         """
 
+                        sh "echo '✅ Tests: Exécution réussie' >> test-report.md"
                     } catch (Exception e) {
+                        sh "echo '❌ Tests: Échec de l'exécution' >> test-report.md"
                         currentBuild.result = 'FAILURE'
                         throw e
                     } finally {
@@ -112,16 +131,6 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Crée les archives
-                        sh """
-                            cd target
-                            zip -r test-results-${BUILD_NUMBER}.zip \
-                                allure-results/ \
-                                cucumber-reports/ \
-                                screenshots/ \
-                                ${EXCEL_REPORTS}/videos/
-                        """
-
                         // Génère les rapports
                         allure([
                             includeProperties: true,
@@ -139,17 +148,39 @@ pipeline {
                                 ['key': '🎥 Video', 'value': 'Available']
                             ]
 
+                        // Ajoute les résultats au rapport MD
+                        sh """
+                            echo "### Test Results" >> test-report.md
+                            echo "- Status: ${currentBuild.result ?: 'SUCCESS'}" >> test-report.md
+                            echo "- Duration: ${currentBuild.durationString}" >> test-report.md
+                            echo "\\n### Links" >> test-report.md
+                            echo "- Allure Report: ${BUILD_URL}allure/" >> test-report.md
+                            echo "- Cucumber Report: ${BUILD_URL}cucumber-html-reports/" >> test-report.md
+                            echo "- Video Recording: ${BUILD_URL}artifact/${VIDEO_DIR}/" >> test-report.md
+                        """
+
+                        // Convertit MD en PDF
+                        sh """
+                            markdown-pdf test-report.md -o ${PDF_REPORTS}/TestReport_${BUILD_NUMBER}.pdf
+                            cd target && zip -r test-results-${BUILD_NUMBER}.zip \
+                                allure-results/ \
+                                cucumber-reports/ \
+                                screenshots/ \
+                                pdf-reports/
+                        """
+
                         // Archive les artifacts
                         archiveArtifacts artifacts: """
-                            ${EXCEL_REPORTS}/**/*.xlsx,
+                            ${PDF_REPORTS}/**/*.pdf,
                             ${VIDEO_DIR}/**/*.mp4,
                             target/test-results-${BUILD_NUMBER}.zip,
                             target/cucumber.json
                         """, allowEmptyArchive: true
 
+                        sh "echo '✅ Rapports: Génération réussie' >> test-report.md"
                     } catch (Exception e) {
+                        sh "echo '❌ Rapports: Échec de la génération' >> test-report.md"
                         currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Erreur rapports: ${e.message}"
                     }
                 }
             }
@@ -172,14 +203,13 @@ pipeline {
 🌐 Navigateur: ${params.BROWSER}
 
 📊 Rapports:
+🔹 PDF:       ${BUILD_URL}artifact/${PDF_REPORTS}/TestReport_${BUILD_NUMBER}.pdf
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
 🔹 Video:     ${BUILD_URL}artifact/${VIDEO_DIR}/
-🔹 Excel:     ${BUILD_URL}artifact/${EXCEL_REPORTS}/
 
 ${statusEmoji} Statut Final: ${status}
 """
-
                 // Nettoie l'espace de travail
                 sh """
                     find . -type f -name '*.tmp' -delete
