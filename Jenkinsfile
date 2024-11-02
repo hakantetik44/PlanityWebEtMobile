@@ -137,13 +137,12 @@ pipeline {
         stage('Generate Excel Report') {
             steps {
                 script {
+                    // List files in target directory for debugging
+                    sh 'ls -la target/'
+
+                    // Attempt to generate Excel report
                     try {
-                        // Assuming you have a Java class that creates an Excel report
-                        // Example command to run a Java program that generates the report
-                        sh """
-                            java -cp target/myapp.jar com.example.ExcelReportGenerator ${EXCEL_REPORT_PATH}
-                        """
-                        archiveArtifacts artifacts: EXCEL_REPORT_PATH, allowEmptyArchive: true
+                        sh 'java -cp target/myapp.jar com.example.ExcelReportGenerator target/test-report.xlsx'
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
                         echo "⚠️ Excel report generation error: ${e.message}"
@@ -151,6 +150,7 @@ pipeline {
                 }
             }
         }
+
     }
 
     post {
