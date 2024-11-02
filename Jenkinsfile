@@ -22,21 +22,9 @@ pipeline {
     }
 
     parameters {
-        choice(
-            name: 'PLATFORM_NAME',
-            choices: ['Web', 'Android', 'iOS'],
-            description: 'Sélectionnez la plateforme de test'
-        )
-        choice(
-            name: 'BROWSER',
-            choices: ['chrome', 'firefox', 'safari'],
-            description: 'Sélectionnez le navigateur (pour Web uniquement)'
-        )
-        booleanParam(
-            name: 'RECORD_VIDEO',
-            defaultValue: true,
-            description: 'Activer l\'enregistrement vidéo'
-        )
+        choice(name: 'PLATFORM_NAME', choices: ['Web', 'Android', 'iOS'], description: 'Sélectionnez la plateforme de test')
+        choice(name: 'BROWSER', choices: ['chrome', 'firefox', 'safari'], description: 'Sélectionnez le navigateur (pour Web uniquement)')
+        booleanParam(name: 'RECORD_VIDEO', defaultValue: true, description: 'Activer l\'enregistrement vidéo')
     }
 
     options {
@@ -96,15 +84,15 @@ pipeline {
                     try {
                         echo "🧪 Lancement des tests..."
 
+                        // Correctly format the Maven command
                         def mvnCommand = """
-                            ${M2_HOME}/bin/mvn test
-                            -Dtest=runner.TestRunner
-                            -DplatformName=${params.PLATFORM_NAME}
-                            -Dbrowser=${params.BROWSER}
-                            -DrecordVideo=${params.RECORD_VIDEO}
-                            -DvideoFolder=${VIDEO_FOLDER}
-                            -DscreenshotFolder=${SCREENSHOT_FOLDER}
-                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm"
+                            ${M2_HOME}/bin/mvn test -Dtest=runner.TestRunner \
+                            -DplatformName=${params.PLATFORM_NAME} \
+                            -Dbrowser=${params.BROWSER} \
+                            -DrecordVideo=${params.RECORD_VIDEO} \
+                            -DvideoFolder=${VIDEO_FOLDER} \
+                            -DscreenshotFolder=${SCREENSHOT_FOLDER} \
+                            -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn
                         """
 
@@ -181,41 +169,7 @@ pipeline {
         always {
             script {
                 def status = currentBuild.result ?: 'SUCCESS'
-                def testResults = []
-
-                // Use a script block for file operations
-                if (fileExists('target/cucumber.json')) {
-                    def jsonFile = new File('target/cucumber.json')
-                    testResults = new groovy.json.JsonSlurper().parse(jsonFile)
-                }
-
-                def summary = """╔═══════════════════════════╗
-║   Résumé de l'Exécution   ║
-╚═══════════════════════════╝
-
-📝 Rapports:
-• Allure: ${BUILD_URL}allure/
-• Cucumber: ${BUILD_URL}cucumber-html-reports/overview-features.html
-• Vidéos: ${BUILD_URL}artifact/target/test-execution-videos.zip
-• Screenshots: ${BUILD_URL}artifact/target/screenshots.zip
-• Excel: ${BUILD_URL}artifact/${EXCEL_REPORTS}/
-
-🔍 Configuration:
-• Plateforme: ${params.PLATFORM_NAME}
-• Navigateur: ${params.BROWSER}
-• Enregistrement Vidéo: ${params.RECORD_VIDEO}
-• Build: #${BUILD_NUMBER}
-
-${status == 'SUCCESS' ? '✅ SUCCÈS' : '❌ ÉCHEC'}"""
-
-                echo summary
-
-                // Clean workspace but keep reports
-                sh """
-                    if [ -d "target" ]; then
-                        find target -type f ! -name '*.zip' ! -name '*.xlsx' ! -name '*.json' ! -name '*.mp4' ! -name '*.png' -delete
-                    fi
-                """
+                echo """Résumé de l'exécution : ${status}"""
             }
         }
         failure {
