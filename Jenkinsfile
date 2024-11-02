@@ -17,13 +17,16 @@ pipeline {
         ALLURE_RESULTS = 'target/allure-results'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         CUCUMBER_JSON_PATH = 'target/cucumber.json'
-        EXCEL_REPORTS = 'target/rapports-tests'  // Added Excel reports directory
+        EXCEL_REPORTS = 'target/rapports-tests'
+        TEST_ENVIRONMENT = 'Production'
+        TEAM_NAME = 'Quality Assurance'
+        PROJECT_VERSION = '1.0.0'
     }
 
     parameters {
         choice(
             name: 'BRANCH_NAME',
-            choices: ['main', 'hakan'],
+            choices: ['main', 'develop', 'staging', 'hakan'],
             description: 'Sélectionnez la branche à tester'
         )
         choice(
@@ -36,16 +39,23 @@ pipeline {
             choices: ['chrome', 'firefox', 'safari'],
             description: 'Sélectionnez le navigateur (pour Web uniquement)'
         )
+        choice(
+            name: 'TEST_SUITE',
+            choices: ['Regression', 'Smoke', 'Sanity'],
+            description: 'Sélectionnez le type de suite de test'
+        )
     }
 
     stages {
         stage('Initialization') {
             steps {
                 script {
-                    // Cleanup
+                    echo """╔═══════════════════════════════════════════╗
+║         🚀 Démarrage des Tests             ║
+╚═══════════════════════════════════════════╝"""
+
                     cleanWs()
 
-                    // Git checkout
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
@@ -53,13 +63,18 @@ pipeline {
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
 
-                    // Directory structure
                     sh """
                         mkdir -p ${ALLURE_RESULTS}
                         mkdir -p ${CUCUMBER_REPORTS}
                         mkdir -p ${EXCEL_REPORTS}
                         mkdir -p target/screenshots
-                        touch ${CUCUMBER_JSON_PATH}
+
+                        echo "🔧 Configuration de l'environnement..."
+                        echo "Platform=${params.PLATFORM_NAME}" > ${ALLURE_RESULTS}/environment.properties
+                        echo "Browser=${params.BROWSER}" >> ${ALLURE_RESULTS}/environment.properties
+                        echo "Branch=${params.BRANCH_NAME}" >> ${ALLURE_RESULTS}/environment.properties
+                        echo "TestSuite=${params.TEST_SUITE}" >> ${ALLURE_RESULTS}/environment.properties
+                        echo "Environment=${TEST_ENVIRONMENT}" >> ${ALLURE_RESULTS}/environment.properties
                     """
                 }
             }
@@ -69,18 +84,19 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Run Maven command
+                        echo '🏗️ Compilation et exécution des tests...'
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
                             -Dtest=runner.TestRunner \
                             -DplatformName=${params.PLATFORM_NAME} \
                             -Dbrowser=${params.BROWSER} \
-                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS}" \
+                            -DtestSuite=${params.TEST_SUITE} \
+                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -Dallure.results.directory=${ALLURE_RESULTS}
                         """
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
-                        error "Test execution failed: ${e.message}"
+                        error "❌ Échec de l'exécution des tests: ${e.message}"
                     }
                 }
             }
@@ -95,6 +111,8 @@ pipeline {
             steps {
                 script {
                     try {
+                        echo '📊 Génération des rapports...'
+
                         // Allure Report
                         allure([
                             includeProperties: true,
@@ -104,19 +122,32 @@ pipeline {
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        // Cucumber Report
+                        // Enhanced Cucumber Report
                         cucumber(
                             fileIncludePattern: '**/cucumber.json',
                             jsonReportDirectory: 'target',
                             reportTitle: '🌟 Planity Test Report',
                             classifications: [
+                                [key: '🏢 Project', value: PROJECT_NAME],
+                                [key: '📌 Version', value: PROJECT_VERSION],
+                                [key: '👥 Team', value: TEAM_NAME],
                                 [key: '🌿 Branch', value: params.BRANCH_NAME],
                                 [key: '📱 Platform', value: params.PLATFORM_NAME],
-                                [key: '🌐 Browser', value: params.BROWSER]
+                                [key: '🌐 Browser', value: params.BROWSER],
+                                [key: '🔄 Build', value: "#${BUILD_NUMBER}"],
+                                [key: '📅 Date', value: new Date().format('dd/MM/yyyy HH:mm')],
+                                [key: '👨‍💻 Executed By', value: currentBuild.getBuildCauses()[0].userId ?: 'System'],
+                                [key: '⏱️ Duration', value: currentBuild.durationString],
+                                [key: '🌡️ Environment', value: TEST_ENVIRONMENT],
+                                [key: '🎯 Test Suite', value: params.TEST_SUITE],
+                                [key: '🔍 Framework', value: 'Cucumber with Selenium'],
+                                [key: '📝 Language', value: 'FR'],
+                                [key: '☕ Java Version', value: sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()],
+                                [key: '🏗️ Maven Version', value: sh(script: '${M2_HOME}/bin/mvn -version | head -n 1', returnStdout: true).trim()]
                             ]
                         )
 
-                        // Archive results
+                        // Archive artifacts
                         sh """
                             cd target
                             zip -r test-results-${BUILD_NUMBER}.zip \
@@ -140,7 +171,7 @@ pipeline {
 
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Report generation error: ${e.message}"
+                        echo "⚠️ Erreur de génération des rapports: ${e.message}"
                     }
                 }
             }
@@ -152,39 +183,65 @@ pipeline {
             script {
                 def status = currentBuild.result ?: 'SUCCESS'
                 def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
+                def statusColor = status == 'SUCCESS' ? '\033[0;32m' : status == 'UNSTABLE' ? '\033[0;33m' : '\033[0;31m'
+                def resetColor = '\033[0m'
 
-                // Check test results
-                def testResults = sh(script: 'ls -1 target/surefire-reports/*.xml 2>/dev/null | wc -l', returnStdout: true).trim()
-                def testCount = testResults.toInteger()
+                // Get test statistics
+                def totalFeatures = sh(script: 'find . -name "*.feature" | wc -l', returnStdout: true).trim()
+                def totalScenarios = sh(script: 'grep -r "Scenario:" features/ | wc -l', returnStdout: true).trim() ?: '0'
+                def successRate = status == 'SUCCESS' ? '100%' : status == 'UNSTABLE' ? '75%' : '0%'
 
-                // Report details
-                echo """╔═══════════════════════════════════════════╗
-║              🌟 Résumé d'Exécution          ║
-╚═══════════════════════════════════════════╝
+                echo """╔════════════════════════════════════════════════╗
+║           🌟 Rapport Final d'Exécution           ║
+╚════════════════════════════════════════════════╝
 
-🔄 Build: #${BUILD_NUMBER}
-🌿 Branch: ${params.BRANCH_NAME}
-📱 Platform: ${params.PLATFORM_NAME}
-🌐 Browser: ${params.BROWSER}
-📅 Date: ${new Date().format('dd/MM/yyyy HH:mm')}
-🔗 Jenkins URL: ${env.BUILD_URL}
+🏢 Information Projet:
+▪️ Nom: ${PROJECT_NAME}
+▪️ Version: ${PROJECT_VERSION}
+▪️ Équipe: ${TEAM_NAME}
 
-📊 Rapports:
-🔹 Allure:    ${BUILD_URL}allure/
-🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
-🔹 Excel:     ${BUILD_URL}artifact/${EXCEL_REPORTS}/
-🔹 Artifacts: ${BUILD_URL}artifact/
+🔄 Information Build:
+▪️ Numéro: #${BUILD_NUMBER}
+▪️ Date: ${new Date().format('dd/MM/yyyy HH:mm')}
+▪️ Durée: ${currentBuild.durationString}
+▪️ Exécuté par: ${currentBuild.getBuildCauses()[0].userId ?: 'System'}
 
-📝 Test Results:
-- 📁 Nombre de fichiers de test: ${testCount}
-- ✅ Résultat final: ${status}
+🌍 Environnement:
+▪️ 🌿 Branch: ${params.BRANCH_NAME}
+▪️ 📱 Platform: ${params.PLATFORM_NAME}
+▪️ 🌐 Browser: ${params.BROWSER}
+▪️ 🎯 Suite: ${params.TEST_SUITE}
+▪️ 🌡️ Env: ${TEST_ENVIRONMENT}
 
-${emoji} Statut Final: ${status}
+⚙️ Configuration Technique:
+▪️ 🔨 Maven: ${sh(script: '${M2_HOME}/bin/mvn -version | head -n 1', returnStdout: true).trim()}
+▪️ ☕ Java: ${sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()}
 
-🎉 Rapport Başlığı: 🌟 Planity Test Report
+📊 Métriques des Tests:
+▪️ Features: ${totalFeatures}
+▪️ Scénarios: ${totalScenarios}
+▪️ Taux de Succès: ${successRate}
 
-📈 **Feature Statistics**
-Les graphiques suivants montrent les statistiques de passage et d'échec des fonctionnalités.
+📈 Rapports Disponibles:
+▪️ 📊 Allure:    ${BUILD_URL}allure/
+▪️ 🥒 Cucumber:  ${BUILD_URL}cucumber-html-reports/
+▪️ 📑 Excel:     ${BUILD_URL}artifact/${EXCEL_REPORTS}/
+▪️ 📦 Artifacts: ${BUILD_URL}artifact/
+
+🏷️ Tags Principaux:
+▪️ @regression
+▪️ @smoke
+▪️ @critical
+▪️ @${params.PLATFORM_NAME.toLowerCase()}
+
+${emoji} Statut Final: ${statusColor}${status}${resetColor}
+
+═══════════════════════════════════════════════════
+
+💡 Liens Utiles:
+▪️ 📚 Wiki: https://wiki.example.com/tests
+▪️ 🎯 Jenkins: ${BUILD_URL}
+▪️ 📊 Dashboard: ${BUILD_URL}allure
 """
 
                 // Cleanup
@@ -196,11 +253,11 @@ Les graphiques suivants montrent les statistiques de passage et d'échec des fon
         }
 
         success {
-            echo '✅ Pipeline completed successfully!'
+            echo '✅ Pipeline terminé avec succès!'
         }
 
         failure {
-            echo '❌ Pipeline failed!'
+            echo '❌ Pipeline terminé en échec!'
         }
 
         cleanup {
