@@ -24,12 +24,36 @@ pipeline {
     }
 
     parameters {
-        choice(name: 'PLATFORM_NAME', choices: ['Web', 'Android', 'iOS'], description: 'Test platformunu seçin')
-        choice(name: 'BROWSER', choices: ['chrome', 'firefox', 'safari'], description: 'Tarayıcı seçin (sadece Web için)')
-        booleanParam(name: 'RECORD_VIDEO', defaultValue: true, description: 'Video kaydını etkinleştir')
-        booleanParam(name: 'PERFORMANCE_TEST', defaultValue: false, description: 'Performans testlerini çalıştır')
-        choice(name: 'TEST_ENVIRONMENT', choices: ['DEV', 'QA', 'STAGING', 'PROD'], description: 'Test ortamı seçin')
-        string(name: 'SLACK_CHANNEL', defaultValue: '#test-automation', description: 'Bildirimler için Slack kanalı')
+        choice(
+            name: 'PLATFORM_NAME',
+            choices: ['Web', 'Android', 'iOS'],
+            description: 'Test edilecek platformu seçin'
+        )
+        choice(
+            name: 'BROWSER',
+            choices: ['chrome', 'firefox', 'safari'],
+            description: 'Web için tarayıcı seçin'
+        )
+        booleanParam(
+            name: 'RECORD_VIDEO',
+            defaultValue: true,
+            description: 'Video kaydını etkinleştir'
+        )
+        booleanParam(
+            name: 'PERFORMANCE_TEST',
+            defaultValue: false,
+            description: 'Performans testlerini çalıştır'
+        )
+        choice(
+            name: 'TEST_ENVIRONMENT',
+            choices: ['DEV', 'QA', 'STAGING', 'PROD'],
+            description: 'Test ortamını seçin'
+        )
+        string(
+            name: 'SLACK_CHANNEL',
+            defaultValue: '#test-automation',
+            description: 'Bildirimler için Slack kanalı'
+        )
     }
 
     options {
@@ -41,10 +65,11 @@ pipeline {
     }
 
     stages {
-        stage('Başlatma') {
+        stage('Başlangıç') {
             steps {
                 script {
-                    // Klasörleri oluştur
+                    echo "🛠️ Başlangıç aşaması..."
+                    // Test klasörlerini oluştur
                     sh """
                         mkdir -p ${EXCEL_REPORTS} ${ALLURE_RESULTS} ${VIDEO_FOLDER} target/screenshots
                         mkdir -p ${PERFORMANCE_REPORTS} ${CODE_COVERAGE} ${TEST_LOGS}
@@ -53,7 +78,7 @@ pipeline {
                         ${M2_HOME}/bin/mvn -version
                     """
 
-                    // Test konfigürasyon dosyasını oluştur
+                    // Test yapılandırma dosyasını oluştur
                     writeFile file: 'target/test-config.json', text: """
                         {
                             "platform": "${params.PLATFORM_NAME}",
@@ -73,16 +98,21 @@ pipeline {
             steps {
                 script {
                     try {
-                        echo "🔍 Ön koşulların kontrolü..."
+                        echo "🔍 Ön koşullar kontrol ediliyor..."
                         sh """
-                            df -h > ${TEST_LOGS}/disk-space.log || echo "Disk alanı kontrolü başarısız"
-                            free -m > ${TEST_LOGS}/memory.log || echo "Bellek kontrolü başarısız"
-                            find target -name "*.log" -mtime +7 -delete || echo "Eski loglar temizlenemedi"
-                            find target -name "*.mp4" -mtime +7 -delete || echo "Eski videolar temizlenemedi"
+                            # Disk alanını kontrol et
+                            df -h > ${TEST_LOGS}/disk-space.log
+
+                            # Bellek durumunu kontrol et
+                            free -m > ${TEST_LOGS}/memory.log
+
+                            # Eski raporları temizle
+                            find target -name "*.log" -mtime +7 -delete
+                            find target -name "*.mp4" -mtime +7 -delete
                         """
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
-                        error "Hazırlık aşamasında hata: ${e.message}. Daha fazla bilgi için loglara bakın."
+                        error "Hazırlık aşamasında hata: ${e.message}"
                     }
                 }
             }
@@ -114,19 +144,20 @@ pipeline {
                             -DscreenshotFolder=target/screenshots \
                             -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm,timeline:${CUCUMBER_REPORTS}/timeline" \
                             -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn \
-                            -Dmaven.test.failure.ignore=true
+                            -Dmaven.test.failure.ignore=true \
                         """
 
-                        // Performans testleri aktifse
+                        // Performans testleri etkinse
                         if (params.PERFORMANCE_TEST) {
                             mvnCommand += " -Dgatling.enabled=true -Dgatling.resultsDirectory=${PERFORMANCE_REPORTS}"
                         }
 
+                        // Maven komutunu çalıştır
                         sh mvnCommand
 
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Test yürütme sırasında hata oluştu: ${e.message}"
+                        echo "⚠️ Testlerin yürütülmesi sırasında hata: ${e.message}"
                     } finally {
                         if (params.RECORD_VIDEO) {
                             sh """
@@ -145,21 +176,34 @@ pipeline {
             steps {
                 script {
                     try {
-                        echo "📊 Sonuçlar analiz ediliyor..."
+                        echo "📊 Sonuçların analizi yapılıyor..."
 
-                        // Raporu oluştur
+                        // Detaylı rapor oluşturma
                         sh """
+                            # Analiz raporunu oluştur
                             echo "Test Özeti Raporu - ${TIMESTAMP}" > ${TEST_LOGS}/analysis.md
                             echo "===========================" >> ${TEST_LOGS}/analysis.md
+
+                            # Test loglarını analiz et
                             grep -r "FAILED" target/surefire-reports/*.txt | tee ${TEST_LOGS}/failures.log
+
+                            # Metrikleri hesapla
                             echo "Test Süresi: \$(grep 'Tests run' target/surefire-reports/*.txt | tail -1)" >> ${TEST_LOGS}/analysis.md
                             echo "Başarısızlık Oranı: \$(grep -c 'FAILED' target/surefire-reports/*.txt)%" >> ${TEST_LOGS}/analysis.md
+
+                            # Arşiv oluştur
                             cd target
-                            zip -q -r test-results-${TIMESTAMP}.zip allure-results/ cucumber-reports/ screenshots/ videos/ test-logs/ performance/
+                            zip -q -r test-results-${TIMESTAMP}.zip \
+                                allure-results/ \
+                                cucumber-reports/ \
+                                screenshots/ \
+                                videos/ \
+                                test-logs/ \
+                                performance/
                         """
 
                     } catch (Exception e) {
-                        echo "⚠️ Analiz sırasında hata oluştu: ${e.message}"
+                        echo "⚠️ Analiz sırasında hata: ${e.message}"
                     }
                 }
             }
@@ -169,14 +213,14 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Allure Raporları
+                        // Allure raporları
                         allure([
                             includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        // Cucumber Raporları
+                        // Cucumber raporları
                         cucumber buildStatus: 'UNSTABLE',
                             reportTitle: 'Planity Test Otomasyon Raporu',
                             fileIncludePattern: '**/cucumber.json',
@@ -217,21 +261,17 @@ pipeline {
                 def status = currentBuild.result ?: 'SUCCESS'
                 def duration = currentBuild.durationString
 
-                // Test detayları
+                // Test raporu için detaylar
                 def testDetails = """
-                    🏗️ Build: #${BUILD_NUMBER}
-                    ⏱️ Süre: ${duration}
-                    🌍 Ortam: ${params.TEST_ENVIRONMENT}
-                    📱 Platform: ${params.PLATFORM_NAME}
-                    🌐 Tarayıcı: ${params.BROWSER}
+                    Test Sonucu: ${status}
+                    Süre: ${duration}
+                    Ortam: ${params.TEST_ENVIRONMENT}
+                    Tarayıcı: ${params.BROWSER}
+                    Tüm Raporlar: ${env.BUILD_URL}/artifact/target/allure-report.zip
                 """
+                echo testDetails
 
-                echo """╔════════════════════════════╗
-║    Çalışma Sonucu: ${status}     ║
-╚════════════════════════════╝
-                """
-
-                // Slack bildirimini gönder
+                // Slack'a bildirim gönder
                 slackSend(channel: params.SLACK_CHANNEL, message: testDetails)
             }
         }
