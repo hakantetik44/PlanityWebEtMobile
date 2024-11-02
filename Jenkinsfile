@@ -129,7 +129,6 @@ Test Suite=${params.TEST_SUITE}
 Build Number=${BUILD_NUMBER}
 Jenkins URL=${BUILD_URL}
 Java Version=\$(java -version 2>&1)
-Maven Version=\$(${M2_HOME}/bin/mvn -version )
 Team=${TEAM_NAME}
 Project=${PROJECT_NAME}
 Version=${PROJECT_VERSION}
@@ -354,5 +353,3 @@ EOF
 ▪️ 🌡️ Env: ${params.TEST_ENV}
 ▪️ 🔗 URL: ${env.TEST_ENV_URL}
 
-⚙️ Configuration Technique:
-▪️ 🔨 Maven: ${sh(script: '${M2_HOME}/bin/mvn -version
