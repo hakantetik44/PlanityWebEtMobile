@@ -18,9 +18,19 @@ pipeline {
         PDF_REPORTS = 'target/pdf-reports'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         VIDEO_DIR = "${PDF_REPORTS}/videos"
+        GIT_REPO_URL = 'https://github.com/hakantetik44/PlanityWebEtMobile.git'
     }
 
     parameters {
+        gitParameter(
+            name: 'BRANCH_NAME',
+            type: 'PT_BRANCH',
+            defaultValue: 'main',
+            selectedValue: 'DEFAULT',
+            branchFilter: 'origin/(.*)',
+            description: 'Sélectionnez la branche à tester',
+            useRepository: GIT_REPO_URL
+        )
         choice(
             name: 'PLATFORM_NAME',
             choices: ['Web', 'Android', 'iOS'],
@@ -34,29 +44,47 @@ pipeline {
     }
 
     stages {
+        stage('Checkout Branch') {
+            steps {
+                script {
+                    echo "🔄 Checkout de la branche: ${params.BRANCH_NAME}"
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "${params.BRANCH_NAME}"]],
+                        userRemoteConfigs: [[
+                            url: GIT_REPO_URL,
+                            credentialsId: 'git-credentials'
+                        ]]
+                    ])
+                }
+            }
+        }
+
         stage('Initialisation') {
             steps {
                 script {
                     echo "╔═══════════════════════════════╗\n║ Démarrage de l'Automatisation ║\n╚═══════════════════════════════╝"
-                    cleanWs()
-                    checkout scm
+
+                    // Git branch info
+                    def branchInfo = sh(script: 'git branch -v', returnStdout: true).trim()
+                    echo "📂 Branche actuelle:\n${branchInfo}"
 
                     sh """
                         mkdir -p ${VIDEO_DIR} ${ALLURE_RESULTS} ${CUCUMBER_REPORTS} ${PDF_REPORTS}
                         mkdir -p target/screenshots
                         chmod -R 777 ${VIDEO_DIR}
-                        npm install -g markdown-pdf
                         export JAVA_HOME=${JAVA_HOME}
                         java -version
                         ${M2_HOME}/bin/mvn -version
                     """
 
-                    // Crée le fichier markdown pour le rapport
+                    // Create PDF report header
                     writeFile file: 'test-report.md', text: """
 # Test Execution Report ${BUILD_NUMBER}
 ## ${new Date().format('dd/MM/yyyy HH:mm')}
 
 ### Configuration
+- Branch: ${params.BRANCH_NAME}
 - Platform: ${params.PLATFORM_NAME}
 - Browser: ${params.BROWSER}
 - Build: #${BUILD_NUMBER}
@@ -73,8 +101,6 @@ pipeline {
                     try {
                         echo "📦 Installation des dépendances..."
                         sh "${M2_HOME}/bin/mvn clean install -DskipTests -B"
-
-                        // Ajoute l'étape au rapport
                         sh "echo '✅ Construction: Installation des dépendances réussie' >> test-report.md"
                     } catch (Exception e) {
                         sh "echo '❌ Construction: Échec de l'installation des dépendances' >> test-report.md"
@@ -107,7 +133,8 @@ pipeline {
                             -DvideoDir=${VIDEO_DIR} \
                             -DscreenshotsDir=target/screenshots \
                             -Dcucumber.plugin="pretty,json:target/cucumber.json,html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-                            -Dallure.results.directory=${ALLURE_RESULTS}
+                            -Dallure.results.directory=${ALLURE_RESULTS} \
+                            -Dbranch=${params.BRANCH_NAME}
                         """
 
                         sh "echo '✅ Tests: Exécution réussie' >> test-report.md"
@@ -131,7 +158,6 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Génère les rapports
                         allure([
                             includeProperties: true,
                             reportBuildPolicy: 'ALWAYS',
@@ -143,25 +169,29 @@ pipeline {
                             fileIncludePattern: '**/cucumber.json',
                             trendsLimit: 10,
                             classifications: [
+                                ['key': '🌿 Branch', 'value': params.BRANCH_NAME],
                                 ['key': '🚀 Platform', 'value': params.PLATFORM_NAME],
                                 ['key': '🌐 Browser', 'value': params.BROWSER],
                                 ['key': '🎥 Video', 'value': 'Available']
                             ]
 
-                        // Ajoute les résultats au rapport MD
+                        // Create PDF report
                         sh """
                             echo "### Test Results" >> test-report.md
+                            echo "- Branch: ${params.BRANCH_NAME}" >> test-report.md
                             echo "- Status: ${currentBuild.result ?: 'SUCCESS'}" >> test-report.md
                             echo "- Duration: ${currentBuild.durationString}" >> test-report.md
+                            echo "\\n### Git Info" >> test-report.md
+                            git log -1 --pretty=format:"Commit: %h%nAuthor: %an%nDate: %ad%nMessage: %s" >> test-report.md
                             echo "\\n### Links" >> test-report.md
                             echo "- Allure Report: ${BUILD_URL}allure/" >> test-report.md
                             echo "- Cucumber Report: ${BUILD_URL}cucumber-html-reports/" >> test-report.md
                             echo "- Video Recording: ${BUILD_URL}artifact/${VIDEO_DIR}/" >> test-report.md
                         """
 
-                        // Convertit MD en PDF
                         sh """
-                            markdown-pdf test-report.md -o ${PDF_REPORTS}/TestReport_${BUILD_NUMBER}.pdf
+                            # Convert to PDF and archive results
+                            markdown-pdf test-report.md -o ${PDF_REPORTS}/TestReport_${params.BRANCH_NAME}_${BUILD_NUMBER}.pdf
                             cd target && zip -r test-results-${BUILD_NUMBER}.zip \
                                 allure-results/ \
                                 cucumber-reports/ \
@@ -169,7 +199,6 @@ pipeline {
                                 pdf-reports/
                         """
 
-                        // Archive les artifacts
                         archiveArtifacts artifacts: """
                             ${PDF_REPORTS}/**/*.pdf,
                             ${VIDEO_DIR}/**/*.mp4,
@@ -177,10 +206,9 @@ pipeline {
                             target/cucumber.json
                         """, allowEmptyArchive: true
 
-                        sh "echo '✅ Rapports: Génération réussie' >> test-report.md"
                     } catch (Exception e) {
-                        sh "echo '❌ Rapports: Échec de la génération' >> test-report.md"
                         currentBuild.result = 'UNSTABLE'
+                        echo "⚠️ Erreur rapports: ${e.message}"
                     }
                 }
             }
@@ -198,19 +226,20 @@ pipeline {
 ╚═══════════════════════════════════════════╝
 
 🎯 Build: #${BUILD_NUMBER}
+🌿 Branch: ${params.BRANCH_NAME}
 🕒 Durée: ${currentBuild.durationString}
 📱 Plateforme: ${params.PLATFORM_NAME}
 🌐 Navigateur: ${params.BROWSER}
 
 📊 Rapports:
-🔹 PDF:       ${BUILD_URL}artifact/${PDF_REPORTS}/TestReport_${BUILD_NUMBER}.pdf
+🔹 PDF:       ${BUILD_URL}artifact/${PDF_REPORTS}/TestReport_${params.BRANCH_NAME}_${BUILD_NUMBER}.pdf
 🔹 Allure:    ${BUILD_URL}allure/
 🔹 Cucumber:  ${BUILD_URL}cucumber-html-reports/
 🔹 Video:     ${BUILD_URL}artifact/${VIDEO_DIR}/
 
 ${statusEmoji} Statut Final: ${status}
 """
-                // Nettoie l'espace de travail
+                // Clean workspace
                 sh """
                     find . -type f -name '*.tmp' -delete
                     find . -type f -name '*.log' -mtime +7 -delete
