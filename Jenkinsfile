@@ -355,4 +355,4 @@ EOF
 ▪️ 🔗 URL: ${env.TEST_ENV_URL}
 
 ⚙️ Configuration Technique:
-▪️ 🔨 Maven: ${sh(script: '${M2_HOME}/bin/mvn -version | head -n 1
+▪️ 🔨 Maven: ${sh(script: '${M2_HOME}/bin/mvn -version
