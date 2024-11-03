@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     tools {
-        maven 'maven'
-        jdk 'JDK17'
-        allure 'Allure'
+        maven 'maven'  // Define Maven version
+        jdk 'JDK17'    // Define JDK version
+        allure 'Allure' // Define Allure installation
     }
 
     environment {
@@ -245,7 +245,7 @@ ${emoji} Final Status: ${statusColor}${status}${resetColor}
 ▪️ 📊 Dashboard: ${BUILD_URL}allure
 """
 
-                // Cleanup
+                // Cleanup temporary files
                 sh """
                     find . -type f -name "*.tmp" -delete || true
                     find . -type d -name "node_modules" -exec rm -rf {} + || true
