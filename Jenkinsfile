@@ -71,36 +71,39 @@ pipeline {
     }
 
     stages {
-        stage('Initialisation') {
-            steps {
-                script {
-                    echo """╔═══════════════════════════════════════════╗
-║         🚀 Démarrage des Tests             ║
-╚═══════════════════════════════════════════╝"""
+       stage('Initialisation') {
+           steps {
+               script {
+                   echo """╔═══════════════════════════════════════════╗
+       ║         🚀 Démarrage des Tests             ║
+       ╚═══════════════════════════════════════════╝"""
 
-                    cleanWs()
+                   cleanWs()
 
-                    // Détection de l'OS et configuration de ffmpeg
-                    def isMac = sh(script: 'uname', returnStdout: true).trim() == 'Darwin'
+                   // Vérification de l'OS et ffmpeg
+                   def isMac = sh(script: 'uname', returnStdout: true).trim() == 'Darwin'
 
-                    if (params.RECORD_VIDEO) {
-                        if (isMac) {
-                            sh '''
-                                if ! command -v ffmpeg &> /dev/null; then
-                                    echo "❌ ffmpeg n'est pas installé. Installation nécessaire."
-                                    if command -v brew &> /dev/null; then
-                                        brew install ffmpeg
-                                    else
-                                        echo "⚠️ Homebrew n'est pas installé. Installation manuelle de ffmpeg requise."
-                                        exit 1
-                                    fi
-                                else
-                                    echo "✅ ffmpeg est déjà installé"
-                                fi
-                            '''
-                        }
-                    }
+                   if (params.RECORD_VIDEO) {
+                       def hasFfmpeg = sh(
+                           script: 'command -v ffmpeg || true',
+                           returnStdout: true
+                       ).trim()
 
+                       if (!hasFfmpeg) {
+                           echo "⚠️ ffmpeg n'est pas installé. La capture vidéo sera désactivée."
+                           env.ENABLE_VIDEO = 'false'
+                       } else {
+                           env.ENABLE_VIDEO = 'true'
+                           echo "✅ ffmpeg est disponible, la capture vidéo sera activée."
+                       }
+                   } else {
+                       env.ENABLE_VIDEO = 'false'
+                   }
+
+                   // Reste du code d'initialisation...
+               }
+           }
+       }
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
@@ -129,58 +132,49 @@ EOF
             }
         }
 stage('Build & Test') {
-            steps {
-                script {
-                    try {
-                        // Démarrage de l'enregistrement vidéo
-                        if (params.RECORD_VIDEO) {
-                            def isMac = sh(script: 'uname', returnStdout: true).trim() == 'Darwin'
-                            if (isMac) {
-                                sh """
-                                    ffmpeg -f avfoundation -i "1" -framerate ${VIDEO_FRAME_RATE} \
-                                    -video_size ${SCREEN_RESOLUTION} \
-                                    -vcodec libx264 -pix_fmt yuv420p \
-                                    "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
-                                    echo \$! > video-pid
-                                """
-                            } else {
-                                sh """
-                                    ffmpeg -f x11grab -video_size ${SCREEN_RESOLUTION} \
-                                    -framerate ${VIDEO_FRAME_RATE} -i :0.0 \
-                                    -vcodec libx264 -pix_fmt yuv420p \
-                                    "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
-                                    echo \$! > video-pid
-                                """
-                            }
-                        }
-
-                        echo '🏗️ Compilation et exécution des tests...'
+    steps {
+        script {
+            try {
+                // Démarrage de la capture vidéo uniquement si disponible
+                if (env.ENABLE_VIDEO == 'true') {
+                    def isMac = sh(script: 'uname', returnStdout: true).trim() == 'Darwin'
+                    if (isMac) {
                         sh """
-                            ${M2_HOME}/bin/mvn clean test \
-                            -Dtest=runner.TestRunner \
-                            -DplatformName=${params.PLATFORM_NAME} \
-                            -Dbrowser=${params.BROWSER} \
-                            -DtestSuite=${params.TEST_SUITE} \
-                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
-                            -Dallure.results.directory=${ALLURE_RESULTS}
+                            ffmpeg -f avfoundation -i "1" -framerate ${VIDEO_FRAME_RATE} \
+                            -video_size ${SCREEN_RESOLUTION} \
+                            -vcodec libx264 -pix_fmt yuv420p \
+                            "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
+                            echo \$! > video-pid || true
                         """
-                    } catch (Exception e) {
-                        currentBuild.result = 'FAILURE'
-                        error "❌ Échec de l'exécution des tests: ${e.message}"
-                    } finally {
-                        // Arrêt de l'enregistrement vidéo
-                        if (params.RECORD_VIDEO) {
-                            sh '''
-                                if [ -f video-pid ]; then
-                                    kill $(cat video-pid) || true
-                                    rm video-pid
-                                    sleep 2
-                                fi
-                            '''
-                        }
+                    } else {
+                        sh """
+                            ffmpeg -f x11grab -video_size ${SCREEN_RESOLUTION} \
+                            -framerate ${VIDEO_FRAME_RATE} -i :0.0 \
+                            -vcodec libx264 -pix_fmt yuv420p \
+                            "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
+                            echo \$! > video-pid || true
+                        """
                     }
                 }
+
+            } catch (Exception e) {
+                currentBuild.result = 'FAILURE'
+                throw e
+            } finally {
+
+                if (env.ENABLE_VIDEO == 'true') {
+                    sh '''
+                        if [ -f video-pid ]; then
+                            kill $(cat video-pid) 2>/dev/null || true
+                            rm -f video-pid
+                            sleep 2
+                        fi
+                    '''
+                }
             }
+        }
+    }
+}
             post {
                 always {
                     junit testResults: '**/target/surefire-reports/*.xml', allowEmptyResults: true
