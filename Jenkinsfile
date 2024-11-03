@@ -304,4 +304,3 @@ ${emoji} Statut Final: ${status}
             cleanWs()
         }
     }
-}
