@@ -1,6 +1,5 @@
 package stepdefinitions;
 
-import io.appium.java_client.android.AndroidDriver;
 import io.cucumber.java.After;
 import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
@@ -27,8 +26,10 @@ import java.util.Date;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
+
 public class Hooks {
-    public static final String NOM_APK = "radio-france.apk";
+    public static final String NOM_APK = "planity.apk";
+    public static final String NOM_IPA = "planity.ipa"; // iOS app dosyası
     public static final String URL_WEB = "https://www.planity.com/";
     protected WebDriverWait attente;
     private TestManager infosTest;
@@ -64,6 +65,11 @@ public class Hooks {
                 infosTest.setResultatAttendu("L'application Android doit être lancée");
                 if (Driver.Android == null) {
                     Driver.Android = Driver.getAndroidDriver(Driver.getAndroidApps());
+                }
+            } else if (OS.isIOS()) {
+                infosTest.setResultatAttendu("L'application iOS doit être lancée");
+                if (Driver.iOS == null) {
+                    Driver.iOS = Driver.getIOSDriver(Driver.getIOSApps());
                 }
             }
 
@@ -130,6 +136,40 @@ public class Hooks {
             System.err.println("⚠️ Erreur lors du démarrage de l'enregistrement vidéo: " + e.getMessage());
         }
     }
+    private void stopVideoRecording() {
+        if (videoProcess != null) {
+            try {
+                // Determine the operating system
+                String osName = System.getProperty("os.name").toLowerCase();
+
+                // Stop ffmpeg based on OS
+                if (osName.contains("mac") || osName.contains("linux")) {
+                    // For MacOS and Linux systems
+                    Runtime.getRuntime().exec("pkill -SIGINT -f ffmpeg");
+                } else {
+                    // For Windows systems
+                    Runtime.getRuntime().exec("taskkill /F /IM ffmpeg.exe");
+                    videoProcess.destroy();
+                }
+
+                // Wait for the process to end
+                boolean processStopped = videoProcess.waitFor(5, TimeUnit.SECONDS);
+
+                if (processStopped) {
+                    System.out.println("📹 Enregistrement vidéo terminé avec succès");
+                } else {
+                    System.out.println("⚠️ Le processus d'enregistrement vidéo n'a pas pu être arrêté dans le délai imparti");
+                    videoProcess.destroyForcibly();
+                }
+
+            } catch (Exception e) {
+                System.err.println("⚠️ Erreur lors de l'arrêt de l'enregistrement vidéo: " + e.getMessage());
+                e.printStackTrace();
+            } finally {
+                videoProcess = null;
+            }
+        }
+    }
     private void loadConfigurationProperties() {
         Properties properties = new Properties();
         try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
@@ -141,22 +181,86 @@ public class Hooks {
             e.printStackTrace();
         }
     }
+    private void gererPopupsEtCookies() {
+        TestManager infosPopup = TestManager.getInstance();
+        infosPopup.setNomEtape("Gestion des Popups et Cookies");
+        StringBuilder resultats = new StringBuilder();
 
+        try {
+            // Web için popup ve cookie yönetimi
+            if (OS.isWeb()) {
+                for (String xpath : new String[]{
+                        "//button[contains(.,'Accepter & Fermer')]",
+                        "//button[contains(.,'Tout accepter')]",
+                        "//button[contains(.,'Accept All')]"
+                }) {
+                    try {
+                        WebElement element = attente.until(ExpectedConditions.elementToBeClickable(By.xpath(xpath)));
+                        element.click();
+                        resultats.append("✓ Élément cliqué: ").append(xpath).append("\n");
+                        Thread.sleep(1000);
+                    } catch (Exception e) {
+                        resultats.append("⚠️ Élément non trouvé ou déjà géré: ").append(xpath).append("\n");
+                    }
+                }
+            }
+            // iOS için popup yönetimi
+            else if (OS.isIOS()) {
+                try {
+                    // iOS'ta izin popup'larını yönetme
+                    String[] iosPermissions = {
+                            "Allow",
+                            "OK",
+                            "Accept",
+                            "Continue"
+                    };
+
+                    for (String permission : iosPermissions) {
+                        try {
+                            WebElement element = attente.until(ExpectedConditions.elementToBeClickable(
+                                    By.xpath("//*[@label='" + permission + "']")
+                            ));
+                            element.click();
+                            resultats.append("✓ iOS permission handled: ").append(permission).append("\n");
+                            Thread.sleep(1000);
+                        } catch (Exception e) {
+                            resultats.append("⚠️ iOS permission not found or already handled: ")
+                                    .append(permission).append("\n");
+                        }
+                    }
+                } catch (Exception e) {
+                    resultats.append("⚠️ iOS permissions handling skipped\n");
+                }
+            }
+
+            infosPopup.setStatut("REUSSI");
+            infosPopup.setResultatReel(resultats.toString());
+        } catch (Exception e) {
+            infosPopup.setStatut("ECHEC");
+            infosPopup.setMessageErreur("Erreur lors de la gestion des popups: " + e.getMessage());
+        } finally {
+            TestManager.getInstance().ajouterInfosTest(infosPopup);
+        }
+    }
     @Given("Je lance l'application")
     public void lanceApp() {
         infosTest = TestManager.getInstance();
         infosTest.setNomEtape("Lancement de l'Application");
-        System.out.println("🚀 Lancement de l'application web : " + URL_WEB);
 
         try {
             WebDriver driver = Driver.getCurrentDriver();
             if (driver != null) {
                 if (OS.isWeb()) {
+                    System.out.println("🚀 Lancement de l'application web : " + URL_WEB);
                     driver.get(URL_WEB);
                     this.attente = new WebDriverWait(driver, Duration.ofSeconds(10));
                     gererPopupsEtCookies();
-                    infosTest.setStatut("REUSSI");
-                    infosTest.setResultatReel("L'application web a été lancée avec succès");
+                } else if (OS.isAndroid() || OS.isIOS()) {
+                    System.out.println("🚀 Lancement de l'application mobile");
+                }
+                infosTest.setStatut("REUSSI");
+                infosTest.setResultatReel("L'application a été lancée avec succès");
+                if (OS.isWeb()) {
                     infosTest.setUrl(URL_WEB);
                 }
             } else {
@@ -171,57 +275,7 @@ public class Hooks {
         }
     }
 
-    private void gererPopupsEtCookies() {
-        TestManager infosPopup = TestManager.getInstance();
-        infosPopup.setNomEtape("Gestion des Popups et Cookies");
-        StringBuilder resultats = new StringBuilder();
-
-        try {
-            for (String xpath : new String[]{
-                    "//button[contains(.,'Accepter & Fermer')]"
-            }) {
-                try {
-                    WebElement element = attente.until(ExpectedConditions.elementToBeClickable(By.xpath(xpath)));
-                    element.click();
-                    resultats.append("✓ Élément cliqué: ").append(xpath).append("\n");
-                    Thread.sleep(1000);
-                } catch (Exception e) {
-                    resultats.append("⚠️ Élément non trouvé ou déjà géré: ").append(xpath).append("\n");
-                }
-            }
-
-            infosPopup.setStatut("REUSSI");
-            infosPopup.setResultatReel(resultats.toString());
-        } catch (Exception e) {
-            infosPopup.setStatut("ECHEC");
-            infosPopup.setMessageErreur("Gestion des popups: " + e.getMessage());
-        } finally {
-            TestManager.getInstance().ajouterInfosTest(infosPopup);
-        }
-    }
-
-    private void stopVideoRecording() {
-        if (videoProcess != null) {
-            try {
-                // Arrêt de ffmpeg selon l'OS
-                if (System.getProperty("os.name").toLowerCase().contains("mac") ||
-                        System.getProperty("os.name").toLowerCase().contains("linux")) {
-                    Runtime.getRuntime().exec("pkill -SIGINT -f ffmpeg");
-                } else {
-                    videoProcess.destroy();
-                }
-
-                // Attente de la fin du processus
-                videoProcess.waitFor(5, TimeUnit.SECONDS);
-                System.out.println("📹 Enregistrement vidéo terminé");
-
-            } catch (Exception e) {
-                System.err.println("⚠️ Erreur lors de l'arrêt de l'enregistrement vidéo: " + e.getMessage());
-            } finally {
-                videoProcess = null;
-            }
-        }
-    }
+    // ... (gererPopupsEtCookies ve stopVideoRecording metodları aynı kalıyor)
 
     @After
     public void terminer(Scenario scenario) {
@@ -232,7 +286,9 @@ public class Hooks {
 
             WebDriver driver = Driver.getCurrentDriver();
             if (driver != null) {
-                infosTest.setUrl(driver.getCurrentUrl());
+                if (OS.isWeb()) {
+                    infosTest.setUrl(driver.getCurrentUrl());
+                }
 
                 if (scenario.isFailed()) {
                     infosTest.setStatut("ECHEC");
@@ -274,6 +330,9 @@ public class Hooks {
                 if (OS.isAndroid() && Driver.Android != null) {
                     Driver.Android.terminateApp(getAppPackage());
                     Driver.Android = null;
+                } else if (OS.isIOS() && Driver.iOS != null) {
+                    Driver.iOS.terminateApp(getBundleId());
+                    Driver.iOS = null;
                 } else if (OS.isWeb() && Driver.Web != null) {
                     Driver.Web.quit();
                     Driver.Web = null;
@@ -286,5 +345,9 @@ public class Hooks {
 
     public static String getAppPackage() {
         return "com.radiofrance.radio.radiofrance.android";
+    }
+
+    public static String getBundleId() {
+        return "com.yourcompany.planity"; // iOS uygulamanızın bundle ID'sini buraya yazın
     }
 }

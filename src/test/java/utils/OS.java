@@ -11,6 +11,8 @@ public class OS {
         return "Web".equalsIgnoreCase(OS);
     }
 
-
+    public static boolean isIOS() {
+        return "iOS".equalsIgnoreCase(OS);
+    }
 
 }
