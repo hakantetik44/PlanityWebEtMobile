@@ -130,7 +130,7 @@ EOF
                     """
                 }
             }
-        }
+        }}
 stage('Build & Test') {
     steps {
         script {
