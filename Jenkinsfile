@@ -181,7 +181,7 @@ stage('Build & Test') {
                     archiveArtifacts artifacts: "${VIDEO_DIR}/**/*.mp4", allowEmptyArchive: true
                 }
             }
-        }
+
 
         stage('Rapports') {
             steps {
