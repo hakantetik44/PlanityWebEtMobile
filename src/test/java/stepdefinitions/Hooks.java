@@ -6,10 +6,6 @@ import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
 import io.cucumber.java.en.Given;
 import io.qameta.allure.Allure;
-import org.monte.media.Format;
-import org.monte.media.Registry;
-import org.monte.media.math.Rational;
-import org.monte.screenrecorder.ScreenRecorder;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
@@ -22,7 +18,6 @@ import utils.OS;
 import utils.TestManager;
 import org.openqa.selenium.By;
 
-import java.awt.*;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -30,9 +25,7 @@ import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.util.Date;
 import java.util.Properties;
-
-import static org.monte.media.FormatKeys.*;
-import static org.monte.media.VideoFormatKeys.*;
+import java.util.concurrent.TimeUnit;
 
 public class Hooks {
     public static final String NOM_APK = "radio-france.apk";
@@ -42,12 +35,11 @@ public class Hooks {
     private static boolean isFirstTest = true;
 
     // Configuration de l'enregistrement vidéo
-    private ScreenRecorder screenRecorder;
+    private Process videoProcess;
     private static final String VIDEO_DIR = "target/videos";
-    private static final int FRAME_RATE = 20;
-    private static final int VIDEO_DEPTH = 24;
-    private static final String VIDEO_FORMAT = "avi";
-    private static final Dimension SCREEN_SIZE = Toolkit.getDefaultToolkit().getScreenSize();
+    private static final String FFMPEG_COMMAND = "ffmpeg";
+    private static final int FRAME_RATE = 30;
+    private static final String VIDEO_RESOLUTION = "1920x1080";
 
     @Before
     public void avantTout(Scenario scenario) {
@@ -62,7 +54,7 @@ public class Hooks {
             infosTest.setStatut("DÉMARRÉ");
 
             if (OS.isWeb()) {
-                initializeVideoRecording(scenario);
+                startVideoRecording(scenario.getName());
 
                 if (Driver.Web == null) {
                     Driver.Web = Driver.getWebDriver(ConfigReader.getProperty("browser"));
@@ -90,62 +82,61 @@ public class Hooks {
         }
     }
 
-    private void initializeVideoRecording(Scenario scenario) {
+    private void startVideoRecording(String scenarioName) {
         try {
-            File videoDir = new File(VIDEO_DIR);
-            if (!videoDir.exists()) {
-                videoDir.mkdirs();
+            // Création du répertoire vidéo
+            new File(VIDEO_DIR).mkdirs();
+
+            // Génération du nom de fichier vidéo
+            String videoFileName = VIDEO_DIR + File.separator +
+                    scenarioName.replaceAll("[^a-zA-Z0-9-_\\.]", "_") + "_" +
+                    new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date()) + ".mp4";
+
+            // Configuration de la commande ffmpeg selon l'OS
+            String[] command;
+            if (System.getProperty("os.name").toLowerCase().contains("mac")) {
+                command = new String[]{
+                        FFMPEG_COMMAND,
+                        "-f", "avfoundation",
+                        "-i", "1",
+                        "-r", String.valueOf(FRAME_RATE),
+                        "-vcodec", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-y",
+                        videoFileName
+                };
+            } else {
+                command = new String[]{
+                        FFMPEG_COMMAND,
+                        "-f", "x11grab",
+                        "-video_size", VIDEO_RESOLUTION,
+                        "-i", ":0.0",
+                        "-r", String.valueOf(FRAME_RATE),
+                        "-vcodec", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-y",
+                        videoFileName
+                };
             }
 
-            GraphicsConfiguration gc = GraphicsEnvironment
-                    .getLocalGraphicsEnvironment()
-                    .getDefaultScreenDevice()
-                    .getDefaultConfiguration();
+            // Démarrage de l'enregistrement
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            processBuilder.redirectErrorStream(true);
+            videoProcess = processBuilder.start();
 
-            Rectangle captureArea = new Rectangle(0, 0,
-                    SCREEN_SIZE.width, SCREEN_SIZE.height);
-
-            String videoFileName = VIDEO_DIR + File.separator +
-                    scenario.getName().replaceAll("[^a-zA-Z0-9-_\\.]", "_") + "_" +
-                    new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date()) + "." + VIDEO_FORMAT;
-
-            screenRecorder = new ScreenRecorder(
-                    gc,
-                    captureArea,
-                    new Format(MediaTypeKey, MediaType.FILE, MimeTypeKey, "video/" + VIDEO_FORMAT),
-                    new Format(
-                            MediaTypeKey, MediaType.VIDEO,
-                            EncodingKey, ENCODING_AVI_TECHSMITH_SCREEN_CAPTURE,
-                            CompressorNameKey, ENCODING_AVI_TECHSMITH_SCREEN_CAPTURE,
-                            DepthKey, VIDEO_DEPTH,
-                            FrameRateKey, Rational.valueOf(FRAME_RATE),
-                            QualityKey, 1.0f,
-                            KeyFrameIntervalKey, FRAME_RATE * 60
-                    ),
-                    new Format(
-                            MediaTypeKey, MediaType.VIDEO,
-                            EncodingKey, "black",
-                            FrameRateKey, Rational.valueOf(FRAME_RATE)
-                    ),
-                    null,
-                    new File(videoFileName)
-            );
-
-            screenRecorder.start();
             System.out.println("📹 Enregistrement vidéo démarré: " + videoFileName);
 
         } catch (Exception e) {
-            System.err.println("⚠️ Erreur lors de l'initialisation de l'enregistrement vidéo: " + e.getMessage());
+            System.err.println("⚠️ Erreur lors du démarrage de l'enregistrement vidéo: " + e.getMessage());
         }
     }
-
     private void loadConfigurationProperties() {
         Properties properties = new Properties();
         try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
             properties.load(input);
             Allure.parameter("Browser", properties.getProperty("browser"));
             Allure.parameter("Platform Name", properties.getProperty("platformName"));
-            System.out.println("📝 Variables d'environnement Allure chargées depuis configuration.properties");
+            System.out.println("📝 Variables d'environnement Allure chargées");
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -209,6 +200,29 @@ public class Hooks {
         }
     }
 
+    private void stopVideoRecording() {
+        if (videoProcess != null) {
+            try {
+                // Arrêt de ffmpeg selon l'OS
+                if (System.getProperty("os.name").toLowerCase().contains("mac") ||
+                        System.getProperty("os.name").toLowerCase().contains("linux")) {
+                    Runtime.getRuntime().exec("pkill -SIGINT -f ffmpeg");
+                } else {
+                    videoProcess.destroy();
+                }
+
+                // Attente de la fin du processus
+                videoProcess.waitFor(5, TimeUnit.SECONDS);
+                System.out.println("📹 Enregistrement vidéo terminé");
+
+            } catch (Exception e) {
+                System.err.println("⚠️ Erreur lors de l'arrêt de l'enregistrement vidéo: " + e.getMessage());
+            } finally {
+                videoProcess = null;
+            }
+        }
+    }
+
     @After
     public void terminer(Scenario scenario) {
         try {
@@ -239,7 +253,9 @@ public class Hooks {
             infosTest.setStatut("ECHEC");
             infosTest.setMessageErreur("Erreur finale: " + e.getMessage());
         } finally {
-            stopVideoRecording();
+            if (OS.isWeb()) {
+                stopVideoRecording();
+            }
             TestManager.getInstance().ajouterInfosTest(infosTest);
 
             System.out.println("\n📊 Résumé du test:");
@@ -248,17 +264,6 @@ public class Hooks {
 
             TestManager.getInstance().genererRapport("Planity");
             quitterDriver();
-        }
-    }
-
-    private void stopVideoRecording() {
-        if (screenRecorder != null) {
-            try {
-                screenRecorder.stop();
-                System.out.println("📹 Enregistrement vidéo terminé");
-            } catch (Exception e) {
-                System.err.println("⚠️ Erreur lors de l'arrêt de l'enregistrement vidéo: " + e.getMessage());
-            }
         }
     }
 
