@@ -53,72 +53,85 @@ pipeline {
         )
     }
     stages {
-            stage('Initialization') {
-                steps {
-                    script {
-                        echo """╔═══════════════════════════════════════════╗
-    ║         🚀 Démarrage des Tests             ║
-    ╚═══════════════════════════════════════════╝"""
+           stage('Initialization') {
+               steps {
+                   script {
+                       echo """╔═══════════════════════════════════════════╗
+           ║         🚀 Démarrage des Tests             ║
+           ╚═══════════════════════════════════════════╝"""
 
-                        cleanWs()
+                       cleanWs()
 
-                        checkout([
-                            $class: 'GitSCM',
-                            branches: [[name: "*/${params.BRANCH_NAME}"]],
-                            extensions: [[$class: 'CleanBeforeCheckout']],
-                            userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
-                        ])
+                       // Git checkout
+                       checkout([
+                           $class: 'GitSCM',
+                           branches: [[name: "*/${params.BRANCH_NAME}"]],
+                           extensions: [[$class: 'CleanBeforeCheckout']],
+                           userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
+                       ])
 
-                        sh """
-                            mkdir -p ${ALLURE_RESULTS}
-                            mkdir -p ${CUCUMBER_REPORTS}
-                            mkdir -p ${EXCEL_REPORTS}
-                            mkdir -p ${VIDEO_DIR}
-                            chmod -R 777 ${VIDEO_DIR}
+                       // Création des répertoires
+                       sh """
+                           mkdir -p ${ALLURE_RESULTS}
+                           mkdir -p ${CUCUMBER_REPORTS}
+                           mkdir -p ${EXCEL_REPORTS}
+                           mkdir -p ${VIDEO_DIR}
+                           mkdir -p config
+                           chmod -R 777 ${VIDEO_DIR}
 
-                            echo "🔧 Configuration de l'environnement..."
-                            cat << EOF > ${ALLURE_RESULTS}/environment.properties
-    Platform=${params.PLATFORM_NAME}
-    Browser=${params.BROWSER}
-    Branch=${params.BRANCH_NAME}
-    Environment=Production
-    Video=Enabled
-    EOF
-                        """
+                           # Création du fichier de configuration
+                           cat << EOF > config/configuration.properties
+           platformName=${params.PLATFORM_NAME}
+           browser=${params.BROWSER}
+           environment=Production
+           baseUrl=https://www.planity.com
+           EOF
 
-                        // Configuration de l'enregistrement vidéo
-                        if (env.RECORD_VIDEO == 'true') {
-                            sh '''#!/bin/bash
-                                # Vérification de ffmpeg
-                                if [ -f "/usr/local/bin/ffmpeg" ]; then
-                                    FFMPEG="/usr/local/bin/ffmpeg"
-                                elif [ -f "/opt/homebrew/bin/ffmpeg" ]; then
-                                    FFMPEG="/opt/homebrew/bin/ffmpeg"
-                                else
-                                    echo "⚠️ ffmpeg non trouvé!"
-                                    exit 1
-                                fi
+                           echo "🔧 Configuration de l'environnement..."
+                           cat << EOF > ${ALLURE_RESULTS}/environment.properties
+           Platform=${params.PLATFORM_NAME}
+           Browser=${params.BROWSER}
+           Branch=${params.BRANCH_NAME}
+           Environment=Production
+           Video=Enabled
+           EOF
+                       """
 
-                                echo "📹 ffmpeg trouvé: $FFMPEG"
+                       // Vérification de ffmpeg
+                       sh '''
+                           FFMPEG_PATHS=("/usr/local/bin/ffmpeg" "/opt/homebrew/bin/ffmpeg" "/usr/bin/ffmpeg")
+                           FFMPEG_FOUND=false
 
-                                # Démarrage de l'enregistrement
-                                $FFMPEG -f avfoundation \
-                                    -framerate 30 \
-                                    -i "1:none" \
-                                    -vcodec libx264 \
-                                    -preset ultrafast \
-                                    -pix_fmt yuv420p \
-                                    "${WORKSPACE}/${VIDEO_DIR}/${VIDEO_NAME}" \
-                                    2> "${WORKSPACE}/${VIDEO_DIR}/ffmpeg.log" &
+                           for path in "${FFMPEG_PATHS[@]}"; do
+                               if [ -x "$path" ]; then
+                                   echo "📹 ffmpeg trouvé: $path"
+                                   FFMPEG_FOUND=true
+                                   ln -sf "$path" ./ffmpeg
+                                   break
+                               fi
+                           done
 
-                                echo $! > "${WORKSPACE}/${VIDEO_DIR}/video.pid"
-                                echo "📹 Enregistrement démarré, PID: $(cat ${WORKSPACE}/${VIDEO_DIR}/video.pid)"
-                                sleep 2
-                            '''
-                        }
-                    }
-                }
-            }
+                           if [ "$FFMPEG_FOUND" = false ]; then
+                               echo "⚠️ ffmpeg non trouvé, installation..."
+                               brew install ffmpeg || true
+                           fi
+
+                           if [ -x "./ffmpeg" ]; then
+                               ./ffmpeg -f avfoundation -i "1:none" \
+                                   -framerate ${VIDEO_FRAME_RATE} \
+                                   -vcodec libx264 \
+                                   -preset ultrafast \
+                                   -pix_fmt yuv420p \
+                                   "${VIDEO_DIR}/${VIDEO_NAME}" & \
+                               echo $! > video.pid
+                               echo "📹 Enregistrement vidéo démarré"
+                           else
+                               echo "⚠️ Impossible de démarrer l'enregistrement vidéo"
+                           fi
+                       '''
+                   }
+               }
+           }
 
             stage('Test Execution') {
                 steps {
