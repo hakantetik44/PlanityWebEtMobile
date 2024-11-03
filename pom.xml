@@ -62,6 +62,13 @@
             <version>${log4j.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>com.github.stephenc.monte</groupId>
+            <artifactId>monte-screen-recorder</artifactId>
+            <version>0.7.7.0</version>
+        </dependency>
+
+
         <!-- Apache POI Dependencies -->
         <dependency>
             <groupId>org.apache.poi</groupId>

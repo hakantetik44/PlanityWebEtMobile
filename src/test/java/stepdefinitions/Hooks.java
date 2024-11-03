@@ -6,6 +6,10 @@ import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
 import io.cucumber.java.en.Given;
 import io.qameta.allure.Allure;
+import org.monte.media.Format;
+import org.monte.media.Registry;
+import org.monte.media.math.Rational;
+import org.monte.screenrecorder.ScreenRecorder;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
@@ -18,10 +22,17 @@ import utils.OS;
 import utils.TestManager;
 import org.openqa.selenium.By;
 
+import java.awt.*;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.time.Duration;
+import java.util.Date;
 import java.util.Properties;
+
+import static org.monte.media.FormatKeys.*;
+import static org.monte.media.VideoFormatKeys.*;
 
 public class Hooks {
     public static final String NOM_APK = "radio-france.apk";
@@ -30,17 +41,20 @@ public class Hooks {
     private TestManager infosTest;
     private static boolean isFirstTest = true;
 
+    // Configuration de l'enregistrement vidéo
+    private ScreenRecorder screenRecorder;
+    private static final String VIDEO_DIR = "target/videos";
+    private static final int FRAME_RATE = 20;
+    private static final int VIDEO_DEPTH = 24;
+    private static final String VIDEO_FORMAT = "avi";
+    private static final Dimension SCREEN_SIZE = Toolkit.getDefaultToolkit().getScreenSize();
+
     @Before
     public void avantTout(Scenario scenario) {
-
         try {
-            // Ortam bilgilerini Allure'a yükler
             loadConfigurationProperties();
-
-            // Platformu belirle
             OS.OS = ConfigReader.getProperty("platformName");
 
-            // Rapor bilgilerini başlat
             infosTest = TestManager.getInstance();
             infosTest.setNomScenario(scenario.getName());
             infosTest.setNomEtape("Début du Test");
@@ -48,7 +62,8 @@ public class Hooks {
             infosTest.setStatut("DÉMARRÉ");
 
             if (OS.isWeb()) {
-                infosTest.setResultatAttendu("Le navigateur web doit être lancé");
+                initializeVideoRecording(scenario);
+
                 if (Driver.Web == null) {
                     Driver.Web = Driver.getWebDriver(ConfigReader.getProperty("browser"));
                     this.attente = new WebDriverWait(Driver.Web, Duration.ofSeconds(10));
@@ -62,7 +77,6 @@ public class Hooks {
 
             TestManager.getInstance().ajouterInfosTest(infosTest);
 
-            // Test önerilerini göster
             if (!infosTest.getTestSuggestions().isEmpty()) {
                 System.out.println("\n🤖 Suggestions pour ce test:");
                 infosTest.getTestSuggestions().forEach(s -> System.out.println("• " + s));
@@ -76,18 +90,62 @@ public class Hooks {
         }
     }
 
-    // Configuration properties dosyasından Allure environment değişkenlerini yükleyen metot
+    private void initializeVideoRecording(Scenario scenario) {
+        try {
+            File videoDir = new File(VIDEO_DIR);
+            if (!videoDir.exists()) {
+                videoDir.mkdirs();
+            }
+
+            GraphicsConfiguration gc = GraphicsEnvironment
+                    .getLocalGraphicsEnvironment()
+                    .getDefaultScreenDevice()
+                    .getDefaultConfiguration();
+
+            Rectangle captureArea = new Rectangle(0, 0,
+                    SCREEN_SIZE.width, SCREEN_SIZE.height);
+
+            String videoFileName = VIDEO_DIR + File.separator +
+                    scenario.getName().replaceAll("[^a-zA-Z0-9-_\\.]", "_") + "_" +
+                    new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date()) + "." + VIDEO_FORMAT;
+
+            screenRecorder = new ScreenRecorder(
+                    gc,
+                    captureArea,
+                    new Format(MediaTypeKey, MediaType.FILE, MimeTypeKey, "video/" + VIDEO_FORMAT),
+                    new Format(
+                            MediaTypeKey, MediaType.VIDEO,
+                            EncodingKey, ENCODING_AVI_TECHSMITH_SCREEN_CAPTURE,
+                            CompressorNameKey, ENCODING_AVI_TECHSMITH_SCREEN_CAPTURE,
+                            DepthKey, VIDEO_DEPTH,
+                            FrameRateKey, Rational.valueOf(FRAME_RATE),
+                            QualityKey, 1.0f,
+                            KeyFrameIntervalKey, FRAME_RATE * 60
+                    ),
+                    new Format(
+                            MediaTypeKey, MediaType.VIDEO,
+                            EncodingKey, "black",
+                            FrameRateKey, Rational.valueOf(FRAME_RATE)
+                    ),
+                    null,
+                    new File(videoFileName)
+            );
+
+            screenRecorder.start();
+            System.out.println("📹 Enregistrement vidéo démarré: " + videoFileName);
+
+        } catch (Exception e) {
+            System.err.println("⚠️ Erreur lors de l'initialisation de l'enregistrement vidéo: " + e.getMessage());
+        }
+    }
+
     private void loadConfigurationProperties() {
         Properties properties = new Properties();
-
         try (FileInputStream input = new FileInputStream("config/configuration.properties")) {
             properties.load(input);
-
-            // browser ve platformName bilgilerini Allure raporuna ekler
             Allure.parameter("Browser", properties.getProperty("browser"));
             Allure.parameter("Platform Name", properties.getProperty("platformName"));
-
-            System.out.println("Allure environment değişkenleri configuration.properties dosyasından yüklendi.");
+            System.out.println("📝 Variables d'environnement Allure chargées depuis configuration.properties");
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -97,7 +155,7 @@ public class Hooks {
     public void lanceApp() {
         infosTest = TestManager.getInstance();
         infosTest.setNomEtape("Lancement de l'Application");
-        System.out.println("Lancement de l'application web : " + URL_WEB);
+        System.out.println("🚀 Lancement de l'application web : " + URL_WEB);
 
         try {
             WebDriver driver = Driver.getCurrentDriver();
@@ -128,17 +186,16 @@ public class Hooks {
         StringBuilder resultats = new StringBuilder();
 
         try {
-            // Gérer les popups avec des tentatives multiples
             for (String xpath : new String[]{
                     "//button[contains(.,'Accepter & Fermer')]"
             }) {
                 try {
                     WebElement element = attente.until(ExpectedConditions.elementToBeClickable(By.xpath(xpath)));
                     element.click();
-                    resultats.append("Élément cliqué: ").append(xpath).append("\n");
-                    Thread.sleep(1000); // Petit délai entre les clics
+                    resultats.append("✓ Élément cliqué: ").append(xpath).append("\n");
+                    Thread.sleep(1000);
                 } catch (Exception e) {
-                    resultats.append("Élément non trouvé ou déjà géré: ").append(xpath).append("\n");
+                    resultats.append("⚠️ Élément non trouvé ou déjà géré: ").append(xpath).append("\n");
                 }
             }
 
@@ -169,8 +226,6 @@ public class Hooks {
                         byte[] screenshot = ((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES);
                         scenario.attach(screenshot, "image/png", "screenshot-erreur");
                         infosTest.setResultatReel("Test échoué - Capture d'écran ajoutée");
-
-                        // Hata analizini göster
                         System.out.println("\n🔍 Analyse de l'échec:");
                         System.out.println(infosTest.getMessageErreur());
                     }
@@ -184,16 +239,26 @@ public class Hooks {
             infosTest.setStatut("ECHEC");
             infosTest.setMessageErreur("Erreur finale: " + e.getMessage());
         } finally {
+            stopVideoRecording();
             TestManager.getInstance().ajouterInfosTest(infosTest);
 
-            // Test pattern analizi
             System.out.println("\n📊 Résumé du test:");
             System.out.println("• Scénario: " + scenario.getName());
             System.out.println("• Statut: " + infosTest.getStatut());
 
-            // Rapor oluştur
             TestManager.getInstance().genererRapport("Planity");
             quitterDriver();
+        }
+    }
+
+    private void stopVideoRecording() {
+        if (screenRecorder != null) {
+            try {
+                screenRecorder.stop();
+                System.out.println("📹 Enregistrement vidéo terminé");
+            } catch (Exception e) {
+                System.err.println("⚠️ Erreur lors de l'arrêt de l'enregistrement vidéo: " + e.getMessage());
+            }
         }
     }
 
@@ -210,7 +275,7 @@ public class Hooks {
                 }
             }
         } catch (Exception e) {
-            System.err.println("Erreur lors de la fermeture du driver: " + e.getMessage());
+            System.err.println("⚠️ Erreur lors de la fermeture du driver: " + e.getMessage());
         }
     }
 
