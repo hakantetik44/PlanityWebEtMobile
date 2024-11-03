@@ -18,6 +18,7 @@ pipeline {
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         CUCUMBER_JSON_PATH = 'target/cucumber.json'
         EXCEL_REPORTS = 'target/rapports-tests'
+        VIDEO_DIR = 'target/videos'  // Video dizinini ekledik
         TEST_ENVIRONMENT = 'Production'
         TEAM_NAME = 'Quality Assurance'
         PROJECT_VERSION = '1.0.0'
@@ -44,6 +45,11 @@ pipeline {
             choices: ['Regression', 'Smoke', 'Sanity'],
             description: 'Sélectionnez le type de suite de test'
         )
+        booleanParam(
+            name: 'RECORD_VIDEO',
+            defaultValue: false,
+            description: 'Vidéo kaydını etkinleştir'
+        )
     }
 
     stages {
@@ -68,6 +74,7 @@ pipeline {
                         mkdir -p ${CUCUMBER_REPORTS}
                         mkdir -p ${EXCEL_REPORTS}
                         mkdir -p target/screenshots
+                        mkdir -p ${VIDEO_DIR}  // Video dizini oluşturma
 
                         echo "🔧 Configuration de l'environnement..."
                         echo "Platform=${params.PLATFORM_NAME}" > ${ALLURE_RESULTS}/environment.properties
@@ -85,6 +92,17 @@ pipeline {
                 script {
                     try {
                         echo '🏗️ Compilation et exécution des tests...'
+
+                        // Video kaydını başlatma komutunu ekledik
+                        if (params.RECORD_VIDEO) {
+                            sh """
+                                ffmpeg -video_size 1920x1080 -framerate 25 -f x11grab -i :0.0 \
+                                -codec:v libx264 -preset ultrafast -crf 18 \
+                                ${VIDEO_DIR}/test-video-${BUILD_NUMBER}.mp4 > /dev/null 2>&1 &
+                                echo $! > ${VIDEO_DIR}/ffmpeg.pid
+                            """
+                        }
+
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
                             -Dtest=runner.TestRunner \
@@ -94,6 +112,15 @@ pipeline {
                             -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -Dallure.results.directory=${ALLURE_RESULTS}
                         """
+
+                        // Video kaydını durdurma ve kaydetme işlemi
+                        if (params.RECORD_VIDEO) {
+                            sh """
+                                kill -SIGINT $(cat ${VIDEO_DIR}/ffmpeg.pid)
+                                rm -f ${VIDEO_DIR}/ffmpeg.pid
+                            """
+                        }
+
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         error "❌ Échec de l'exécution des tests: ${e.message}"
@@ -150,7 +177,8 @@ pipeline {
                                 screenshots/ \
                                 surefire-reports/ \
                                 cucumber.json \
-                                rapports-tests/
+                                rapports-tests/ \
+                                videos/  // Video dosyalarını ekliyoruz
                         """
 
                         archiveArtifacts(
@@ -158,7 +186,8 @@ pipeline {
                                 target/test-results-${BUILD_NUMBER}.zip,
                                 target/cucumber.json,
                                 target/surefire-reports/**/*,
-                                ${EXCEL_REPORTS}/**/*.xlsx
+                                ${EXCEL_REPORTS}/**/*.xlsx,
+                                ${VIDEO_DIR}/**/*.mp4  // Video dosyalarını arşivliyoruz
                             """,
                             allowEmptyArchive: true
                         )
