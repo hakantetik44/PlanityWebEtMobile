@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -8,19 +9,30 @@ pipeline {
     }
 
     environment {
+        // Configuration de Base
         JAVA_HOME = "/usr/local/opt/openjdk@17"
         M2_HOME = tool 'maven'
         PATH = "${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}"
         MAVEN_OPTS = '-Xmx3072m'
+
+        // Informations du Projet
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
+        PROJECT_VERSION = '1.0.0'
+        TEAM_NAME = 'Quality Assurance'
+
+        // Répertoires
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
         ALLURE_RESULTS = 'target/allure-results'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
         CUCUMBER_JSON_PATH = 'target/cucumber.json'
         EXCEL_REPORTS = 'target/rapports-tests'
+        VIDEO_DIR = 'target/videos'
+        SCREENSHOT_DIR = 'target/screenshots'
+
+        // Configuration des Tests
         TEST_ENVIRONMENT = 'Production'
-        TEAM_NAME = 'Quality Assurance'
-        PROJECT_VERSION = '1.0.0'
+        VIDEO_FRAME_RATE = '30'
+        SCREEN_RESOLUTION = '1920x1080'
     }
 
     parameters {
@@ -44,10 +56,22 @@ pipeline {
             choices: ['Regression', 'Smoke', 'Sanity'],
             description: 'Sélectionnez le type de suite de test'
         )
+        booleanParam(
+            name: 'RECORD_VIDEO',
+            defaultValue: true,
+            description: 'Activer l\'enregistrement vidéo des tests'
+        )
+    }
+
+    options {
+        timeout(time: 2, unit: 'HOURS')
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
     }
 
     stages {
-        stage('Initialization') {
+        stage('Initialisation') {
             steps {
                 script {
                     echo """╔═══════════════════════════════════════════╗
@@ -55,6 +79,27 @@ pipeline {
 ╚═══════════════════════════════════════════╝"""
 
                     cleanWs()
+
+                    // Détection de l'OS et configuration de ffmpeg
+                    def isMac = sh(script: 'uname', returnStdout: true).trim() == 'Darwin'
+
+                    if (params.RECORD_VIDEO) {
+                        if (isMac) {
+                            sh '''
+                                if ! command -v ffmpeg &> /dev/null; then
+                                    echo "❌ ffmpeg n'est pas installé. Installation nécessaire."
+                                    if command -v brew &> /dev/null; then
+                                        brew install ffmpeg
+                                    else
+                                        echo "⚠️ Homebrew n'est pas installé. Installation manuelle de ffmpeg requise."
+                                        exit 1
+                                    fi
+                                else
+                                    echo "✅ ffmpeg est déjà installé"
+                                fi
+                            '''
+                        }
+                    }
 
                     checkout([
                         $class: 'GitSCM',
@@ -67,23 +112,48 @@ pipeline {
                         mkdir -p ${ALLURE_RESULTS}
                         mkdir -p ${CUCUMBER_REPORTS}
                         mkdir -p ${EXCEL_REPORTS}
-                        mkdir -p target/screenshots
+                        mkdir -p ${VIDEO_DIR}
+                        mkdir -p ${SCREENSHOT_DIR}
 
                         echo "🔧 Configuration de l'environnement..."
-                        echo "Platform=${params.PLATFORM_NAME}" > ${ALLURE_RESULTS}/environment.properties
-                        echo "Browser=${params.BROWSER}" >> ${ALLURE_RESULTS}/environment.properties
-                        echo "Branch=${params.BRANCH_NAME}" >> ${ALLURE_RESULTS}/environment.properties
-                        echo "TestSuite=${params.TEST_SUITE}" >> ${ALLURE_RESULTS}/environment.properties
-                        echo "Environment=${TEST_ENVIRONMENT}" >> ${ALLURE_RESULTS}/environment.properties
+                        cat << EOF > ${ALLURE_RESULTS}/environment.properties
+Platform=${params.PLATFORM_NAME}
+Browser=${params.BROWSER}
+Branch=${params.BRANCH_NAME}
+TestSuite=${params.TEST_SUITE}
+Environment=${TEST_ENVIRONMENT}
+VideoRecording=${params.RECORD_VIDEO}
+EOF
                     """
                 }
             }
         }
-
-        stage('Build & Test') {
+stage('Build & Test') {
             steps {
                 script {
                     try {
+                        // Démarrage de l'enregistrement vidéo
+                        if (params.RECORD_VIDEO) {
+                            def isMac = sh(script: 'uname', returnStdout: true).trim() == 'Darwin'
+                            if (isMac) {
+                                sh """
+                                    ffmpeg -f avfoundation -i "1" -framerate ${VIDEO_FRAME_RATE} \
+                                    -video_size ${SCREEN_RESOLUTION} \
+                                    -vcodec libx264 -pix_fmt yuv420p \
+                                    "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
+                                    echo \$! > video-pid
+                                """
+                            } else {
+                                sh """
+                                    ffmpeg -f x11grab -video_size ${SCREEN_RESOLUTION} \
+                                    -framerate ${VIDEO_FRAME_RATE} -i :0.0 \
+                                    -vcodec libx264 -pix_fmt yuv420p \
+                                    "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
+                                    echo \$! > video-pid
+                                """
+                            }
+                        }
+
                         echo '🏗️ Compilation et exécution des tests...'
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
@@ -97,23 +167,34 @@ pipeline {
                     } catch (Exception e) {
                         currentBuild.result = 'FAILURE'
                         error "❌ Échec de l'exécution des tests: ${e.message}"
+                    } finally {
+                        // Arrêt de l'enregistrement vidéo
+                        if (params.RECORD_VIDEO) {
+                            sh '''
+                                if [ -f video-pid ]; then
+                                    kill $(cat video-pid) || true
+                                    rm video-pid
+                                    sleep 2
+                                fi
+                            '''
+                        }
                     }
                 }
             }
             post {
                 always {
                     junit testResults: '**/target/surefire-reports/*.xml', allowEmptyResults: true
+                    archiveArtifacts artifacts: "${VIDEO_DIR}/**/*.mp4", allowEmptyArchive: true
                 }
             }
         }
 
-        stage('Reports') {
+        stage('Rapports') {
             steps {
                 script {
                     try {
                         echo '📊 Génération des rapports...'
 
-                        // Allure Report
                         allure([
                             includeProperties: true,
                             jdk: '',
@@ -122,32 +203,33 @@ pipeline {
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        // Enhanced Cucumber Report
                         cucumber(
                             fileIncludePattern: '**/cucumber.json',
                             jsonReportDirectory: 'target',
                             reportTitle: '🌟 Planity Test Report',
                             classifications: [
                                 [key: '🏢 Project', value: PROJECT_NAME],
+                                [key: '📌 Version', value: PROJECT_VERSION],
+                                [key: '👥 Team', value: TEAM_NAME],
                                 [key: '🌿 Branch', value: params.BRANCH_NAME],
                                 [key: '📱 Platform', value: params.PLATFORM_NAME],
                                 [key: '🌐 Browser', value: params.BROWSER],
                                 [key: '🔄 Build', value: "#${BUILD_NUMBER}"],
+                                [key: '📅 Date', value: new Date().format('dd/MM/yyyy HH:mm')],
                                 [key: '⏱️ Duration', value: currentBuild.durationString],
                                 [key: '🌡️ Environment', value: TEST_ENVIRONMENT],
-                                [key: '📝 Language', value: 'FR'],
-                                [key: '☕ Java Version', value: sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()]
-
+                                [key: '📹 Video', value: params.RECORD_VIDEO ? 'Activé' : 'Désactivé'],
+                                [key: '📝 Language', value: 'FR']
                             ]
                         )
 
-                        // Archive artifacts
                         sh """
                             cd target
                             zip -r test-results-${BUILD_NUMBER}.zip \
                                 allure-results/ \
                                 cucumber-reports/ \
                                 screenshots/ \
+                                videos/ \
                                 surefire-reports/ \
                                 cucumber.json \
                                 rapports-tests/
@@ -158,7 +240,8 @@ pipeline {
                                 target/test-results-${BUILD_NUMBER}.zip,
                                 target/cucumber.json,
                                 target/surefire-reports/**/*,
-                                ${EXCEL_REPORTS}/**/*.xlsx
+                                ${EXCEL_REPORTS}/**/*.xlsx,
+                                ${VIDEO_DIR}/**/*.mp4
                             """,
                             allowEmptyArchive: true
                         )
@@ -177,13 +260,6 @@ pipeline {
             script {
                 def status = currentBuild.result ?: 'SUCCESS'
                 def emoji = status == 'SUCCESS' ? '✅' : status == 'UNSTABLE' ? '⚠️' : '❌'
-                def statusColor = status == 'SUCCESS' ? '\033[0;32m' : status == 'UNSTABLE' ? '\033[0;33m' : '\033[0;31m'
-                def resetColor = '\033[0m'
-
-                // Get test statistics
-                def totalFeatures = sh(script: 'find . -name "*.feature" | wc -l', returnStdout: true).trim()
-                def totalScenarios = sh(script: 'grep -r "Scenario:" features/ | wc -l', returnStdout: true).trim() ?: '0'
-                def successRate = status == 'SUCCESS' ? '100%' : status == 'UNSTABLE' ? '75%' : '0%'
 
                 echo """╔════════════════════════════════════════════════╗
 ║           🌟 Rapport Final d'Exécution           ║
@@ -205,44 +281,20 @@ pipeline {
 ▪️ 📱 Platform: ${params.PLATFORM_NAME}
 ▪️ 🌐 Browser: ${params.BROWSER}
 ▪️ 🎯 Suite: ${params.TEST_SUITE}
-▪️ 🌡️ Env: ${TEST_ENVIRONMENT}
-
-⚙️ Configuration Technique:
-▪️ 🔨 Maven: ${sh(script: '${M2_HOME}/bin/mvn -version | head -n 1', returnStdout: true).trim()}
-▪️ ☕ Java: ${sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()}
-
-📊 Métriques des Tests:
-▪️ Features: ${totalFeatures}
-▪️ Scénarios: ${totalScenarios}
-▪️ Taux de Succès: ${successRate}
+▪️ 📹 Vidéo: ${params.RECORD_VIDEO ? 'Activé' : 'Désactivé'}
 
 📈 Rapports Disponibles:
 ▪️ 📊 Allure:    ${BUILD_URL}allure/
 ▪️ 🥒 Cucumber:  ${BUILD_URL}cucumber-html-reports/
-▪️ 📑 Excel:     ${BUILD_URL}artifact/${EXCEL_REPORTS}/
+▪️ 📹 Vidéos:    ${BUILD_URL}artifact/${VIDEO_DIR}/
 ▪️ 📦 Artifacts: ${BUILD_URL}artifact/
 
-🏷️ Tags Principaux:
-▪️ @regression
-▪️ @smoke
-▪️ @critical
-▪️ @${params.PLATFORM_NAME.toLowerCase()}
-
-${emoji} Statut Final: ${statusColor}${status}${resetColor}
-
-═══════════════════════════════════════════════════
-
-💡 Liens Utiles:
-▪️ 📚 Wiki: https://wiki.example.com/tests
-▪️ 🎯 Jenkins: ${BUILD_URL}
-▪️ 📊 Dashboard: ${BUILD_URL}allure
+${emoji} Statut Final: ${status}
 """
-
-                // Cleanup
-                sh """
+                sh '''
                     find . -type f -name "*.tmp" -delete || true
                     find . -type d -name "node_modules" -exec rm -rf {} + || true
-                """
+                '''
             }
         }
 
@@ -255,7 +307,7 @@ ${emoji} Statut Final: ${statusColor}${status}${resetColor}
         }
 
         cleanup {
-            deleteDir()
+            cleanWs()
         }
     }
 }
