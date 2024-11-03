@@ -94,14 +94,14 @@ pipeline {
                         echo '🏗️ Compilation et exécution des tests...'
 
                         // Video kaydını başlatma komutunu ekledik
-                      if (params.RECORD_VIDEO) {
-                          sh """
-                              ffmpeg -video_size 1920x1080 -framerate 25 -f x11grab -i :0.0 \
-                              -codec:v libx264 -preset ultrafast -crf 18 \
-                              ${VIDEO_DIR}/test-video-${BUILD_NUMBER}.mp4 > /dev/null 2>&1 &
-                              echo $! > ${VIDEO_DIR}/ffmpeg.pid
-                          """
-                      }
+                        if (params.RECORD_VIDEO) {
+                            sh """
+                                ffmpeg -video_size 1920x1080 -framerate 25 -f x11grab -i :0.0 \
+                                -codec:v libx264 -preset ultrafast -crf 18 \
+                                ${VIDEO_DIR}/test-video-${BUILD_NUMBER}.mp4 > /dev/null 2>&1 &
+                                echo \$! > ${VIDEO_DIR}/ffmpeg.pid
+                            """
+                        }
 
                         sh """
                             ${M2_HOME}/bin/mvn clean test \
@@ -116,7 +116,7 @@ pipeline {
                         // Video kaydını durdurma ve kaydetme işlemi
                         if (params.RECORD_VIDEO) {
                             sh """
-                                kill -SIGINT $(cat ${VIDEO_DIR}/ffmpeg.pid)
+                                kill -SIGINT \$(cat ${VIDEO_DIR}/ffmpeg.pid)
                                 rm -f ${VIDEO_DIR}/ffmpeg.pid
                             """
                         }
@@ -164,7 +164,6 @@ pipeline {
                                 [key: '🌡️ Environment', value: TEST_ENVIRONMENT],
                                 [key: '📝 Language', value: 'FR'],
                                 [key: '☕ Java Version', value: sh(script: 'java -version 2>&1 | head -n 1', returnStdout: true).trim()]
-
                             ]
                         )
 
