@@ -22,14 +22,16 @@ pipeline {
         // Directories
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
         ALLURE_RESULTS = 'target/allure-results'
+        CUCUMBER_REPORTS = 'target/cucumber-reports'
+        CUCUMBER_JSON_PATH = 'target/cucumber.json'
         EXCEL_REPORTS = 'target/rapports-tests'
         VIDEO_DIR = 'target/videos'
-        SCREENSHOT_DIR = 'target/screenshots'
 
         // Video Configuration
+        VIDEO_NAME = "test-recording-${BUILD_NUMBER}.mp4"
         SCREEN_RESOLUTION = '1920x1080'
         VIDEO_FRAME_RATE = '30'
-        ENABLE_VIDEO = 'true'
+        FFMPEG_CMD = '/usr/local/bin/ffmpeg'
     }
 
     parameters {
@@ -60,7 +62,6 @@ pipeline {
 
                     cleanWs()
 
-                    // Git checkout
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "*/${params.BRANCH_NAME}"]],
@@ -68,12 +69,18 @@ pipeline {
                         userRemoteConfigs: [[url: 'https://github.com/hakantetik44/PlanityWebEtMobile.git']]
                     ])
 
-                    // Create directories and set up environment
                     sh """
                         mkdir -p ${ALLURE_RESULTS}
+                        mkdir -p ${CUCUMBER_REPORTS}
                         mkdir -p ${EXCEL_REPORTS}
                         mkdir -p ${VIDEO_DIR}
-                        mkdir -p ${SCREENSHOT_DIR}
+                        chmod 777 ${VIDEO_DIR}
+
+                        # Vérification de ffmpeg
+                        if ! command -v ffmpeg &> /dev/null; then
+                            echo "⚠️ Installing ffmpeg..."
+                            brew install ffmpeg
+                        fi
 
                         echo "🔧 Configuration de l'environnement..."
                         echo "Platform=${params.PLATFORM_NAME}" > ${ALLURE_RESULTS}/environment.properties
@@ -82,16 +89,20 @@ pipeline {
                         echo "Environment=Production" >> ${ALLURE_RESULTS}/environment.properties
                     """
 
-                    // Start video recording for MacOS
-                    if (env.ENABLE_VIDEO == 'true') {
-                        sh """
-                            ffmpeg -f avfoundation -i "1" -framerate ${VIDEO_FRAME_RATE} \
-                            -video_size ${SCREEN_RESOLUTION} \
-                            -vcodec libx264 -pix_fmt yuv420p \
-                            "${VIDEO_DIR}/test-execution-${BUILD_NUMBER}.mp4" & \
-                            echo \$! > video-pid
-                        """
-                    }
+                    // Démarrage de l'enregistrement vidéo
+                    sh """
+                        ${FFMPEG_CMD} -f avfoundation \
+                        -i "1:none" \
+                        -r ${VIDEO_FRAME_RATE} \
+                        -s ${SCREEN_RESOLUTION} \
+                        -vcodec libx264 \
+                        -preset ultrafast \
+                        -pix_fmt yuv420p \
+                        ${VIDEO_DIR}/${VIDEO_NAME} & \
+                        echo \$! > video.pid
+
+                        echo "📹 Enregistrement vidéo démarré: ${VIDEO_DIR}/${VIDEO_NAME}"
+                    """
                 }
             }
         }
@@ -106,22 +117,25 @@ pipeline {
                             -Dtest=runner.TestRunner \
                             -DplatformName=${params.PLATFORM_NAME} \
                             -Dbrowser=${params.BROWSER} \
+                            -Dcucumber.plugin="pretty,json:${CUCUMBER_JSON_PATH},html:${CUCUMBER_REPORTS},io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm" \
                             -Dallure.results.directory=${ALLURE_RESULTS}
                         """
-                    } catch (Exception e) {
-                        currentBuild.result = 'FAILURE'
-                        error "❌ Échec des tests: ${e.message}"
                     } finally {
-                        if (env.ENABLE_VIDEO == 'true') {
-                            sh '''
-                                if [ -f video-pid ]; then
-                                    kill $(cat video-pid) || true
-                                    rm video-pid
-                                    sleep 2
-                                fi
-                            '''
-                        }
+                        sh '''
+                            if [ -f video.pid ]; then
+                                PID=$(cat video.pid)
+                                kill -INT $PID || true
+                                wait $PID 2>/dev/null || true
+                                rm video.pid
+                                echo "📹 Enregistrement vidéo terminé"
+                            fi
+                        '''
                     }
+                }
+            }
+            post {
+                always {
+                    junit testResults: '**/target/surefire-reports/*.xml', allowEmptyResults: true
                 }
             }
         }
@@ -141,19 +155,47 @@ pipeline {
                             results: [[path: "${ALLURE_RESULTS}"]]
                         ])
 
-                        // Archive artifacts
+                        // Cucumber Report
+                        cucumber(
+                            fileIncludePattern: '**/cucumber.json',
+                            jsonReportDirectory: 'target',
+                            reportTitle: '🌟 Planity Test Report',
+                            classifications: [
+                                [key: '🏢 Project', value: PROJECT_NAME],
+                                [key: '📌 Version', value: PROJECT_VERSION],
+                                [key: '🌿 Branch', value: params.BRANCH_NAME],
+                                [key: '📱 Platform', value: params.PLATFORM_NAME],
+                                [key: '🌐 Browser', value: params.BROWSER],
+                                [key: '🔄 Build', value: "#${BUILD_NUMBER}"],
+                                [key: '📅 Date', value: new Date().format('dd/MM/yyyy HH:mm')],
+                                [key: '⏱️ Duration', value: currentBuild.durationString],
+                                [key: '📹 Video', value: 'Enabled']
+                            ]
+                        )
+
+                        // Verification et archivage des artifacts
+                        sh """
+                            if [ -f "${VIDEO_DIR}/${VIDEO_NAME}" ]; then
+                                echo "📹 Vidéo trouvée, taille: \$(ls -lh ${VIDEO_DIR}/${VIDEO_NAME} | awk '{print \$5}')"
+                                cp ${VIDEO_DIR}/${VIDEO_NAME} ${ALLURE_RESULTS}/
+                            else
+                                echo "⚠️ Fichier vidéo non trouvé!"
+                            fi
+                        """
+
                         archiveArtifacts(
                             artifacts: """
-                                ${VIDEO_DIR}/**/*.mp4,
+                                ${VIDEO_DIR}/*.mp4,
                                 ${EXCEL_REPORTS}/**/*.xlsx,
-                                ${SCREENSHOT_DIR}/**/*.png
+                                ${CUCUMBER_REPORTS}/**/*
                             """,
-                            allowEmptyArchive: true
+                            allowEmptyArchive: true,
+                            fingerprint: true
                         )
 
                     } catch (Exception e) {
                         currentBuild.result = 'UNSTABLE'
-                        echo "⚠️ Erreur de rapports: ${e.message}"
+                        echo "⚠️ Erreur de génération des rapports: ${e.message}"
                     }
                 }
             }
@@ -182,6 +224,7 @@ pipeline {
 
 📈 Rapports Disponibles:
 ▪️ 📊 Allure: ${BUILD_URL}allure/
+▪️ 🥒 Cucumber: ${BUILD_URL}cucumber-html-reports/
 ▪️ 📹 Vidéos: ${BUILD_URL}artifact/${VIDEO_DIR}/
 ▪️ 📑 Excel: ${BUILD_URL}artifact/${EXCEL_REPORTS}/
 
@@ -189,6 +232,14 @@ ${emoji} Statut Final: ${status}
 """
             }
             cleanWs()
+        }
+
+        success {
+            echo '✅ Pipeline terminé avec succès!'
+        }
+
+        failure {
+            echo '❌ Pipeline terminé en échec!'
         }
     }
 }
