@@ -33,19 +33,6 @@ Les fonctionnalités suivantes sont mises en œuvre dans l'application Planity :
 
 ## **Planity Web et Mobile Testing**
 
-## **Table des Matières**
-- [Aperçu du Projet](#aperçu-du-projet)
-- [Fonctionnalités](#fonctionnalités)
-- [Technologies Utilisées](#technologies-utilisées)
-- [Prise en Main](#prise-en-main)
-    - [Prérequis](#prérequis)
-    - [Installation](#installation)
-    - [Configuration](#configuration)
-- [Exécution des Tests](#exécution-des-tests)
-- [Structure des Tests](#structure-des-tests)
-- [Rapports](#rapports)
-- [Contributions](#contributions)
-- [Licence](#licence)
 
 ## **Aperçu du Projet**
 
