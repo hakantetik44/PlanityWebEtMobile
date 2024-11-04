@@ -165,14 +165,12 @@ Connexion Internet pour le téléchargement des dépendances
 Installation
 Clonez le dépôt :
 
-bash
-Copier le code
+
 git clone https://github.com/hakantetik44/RadioFranceWebAndMobil.git
 cd RadioFranceWebAndMobil
 Installez les dépendances Maven :
 
-bash
-Copier le code
+
 mvn clean install
 Configuration
 Assurez-vous de configurer les paramètres de l'application dans le fichier src/test/resources/environment.properties ou tout autre fichier de configuration spécifié dans pom.xml. Ajustez les URL et les paramètres d'environnement selon vos besoins.
@@ -180,8 +178,7 @@ Assurez-vous de configurer les paramètres de l'application dans le fichier src/
 Exécution des Tests
 Pour exécuter les tests, utilisez la commande Maven suivante :
 
-bash
-Copier le code
+
 mvn test
 Cette commande compilera les tests et les exécutera selon les spécifications définies dans le répertoire src/test/java.
 
@@ -194,8 +191,7 @@ Les tests sont organisés de la manière suivante :
 Rapports
 Les résultats des tests seront générés dans le répertoire target/allure-results après l'exécution des tests. Pour afficher le rapport, exécutez :
 
-bash
-Copier le code
+
 mvn allure:serve
 Cela démarrera un serveur web pour visualiser les rapports de test.
 
@@ -217,14 +213,11 @@ Connexion Internet pour le téléchargement des dépendances
 Installation
 Clonez le dépôt :
 
-bash
-Copier le code
+
 git clone https://github.com/hakantetik44/RadioFranceWebAndMobil.git
 cd RadioFranceWebAndMobil
 Installez les dépendances Maven :
 
-bash
-Copier le code
 mvn clean install
 Configuration
 Assurez-vous de configurer les paramètres de l'application dans le fichier src/test/resources/environment.properties ou tout autre fichier de configuration spécifié dans pom.xml. Ajustez les URL et les paramètres d'environnement selon vos besoins.
@@ -232,8 +225,7 @@ Assurez-vous de configurer les paramètres de l'application dans le fichier src/
 Exécution des Tests
 Pour exécuter les tests, utilisez la commande Maven suivante :
 
-bash
-Copier le code
+
 mvn test
 Cette commande compilera les tests et les exécutera selon les spécifications définies dans le répertoire src/test/java.
 
@@ -245,9 +237,6 @@ Les tests sont organisés de la manière suivante :
 🖥️ Modèle d'Objet de Page : Situé dans src/test/java/pages, ces classes représentent les pages web et mobiles et contiennent des méthodes pour interagir avec les éléments de l'interface utilisateur.
 Rapports
 Les résultats des tests seront générés dans le répertoire target/allure-results après l'exécution des tests. Pour afficher le rapport, exécutez :
-
-bash
-Copier le code
 mvn allure:serve
 Cela démarrera un serveur web pour visualiser les rapports de test.
 
@@ -269,14 +258,11 @@ Connexion Internet pour le téléchargement des dépendances
 Installation
 Clonez le dépôt :
 
-bash
-Copier le code
 git clone https://github.com/hakantetik44/RadioFranceWebAndMobil.git
 cd RadioFranceWebAndMobil
 Installez les dépendances Maven :
 
-bash
-Copier le code
+
 mvn clean install
 Configuration
 Assurez-vous de configurer les paramètres de l'application dans le fichier src/test/resources/environment.properties ou tout autre fichier de configuration spécifié dans pom.xml. Ajustez les URL et les paramètres d'environnement selon vos besoins.
@@ -284,8 +270,7 @@ Assurez-vous de configurer les paramètres de l'application dans le fichier src/
 Exécution des Tests
 Pour exécuter les tests, utilisez la commande Maven suivante :
 
-bash
-Copier le code
+
 mvn test
 Cette commande compilera les tests et les exécutera selon les spécifications définies dans le répertoire src/test/java.
 
@@ -298,8 +283,7 @@ Les tests sont organisés de la manière suivante :
 Rapports
 Les résultats des tests seront générés dans le répertoire target/allure-results après l'exécution des tests. Pour afficher le rapport, exécutez :
 
-bash
-Copier le code
+
 mvn allure:serve
 Cela démarrera un serveur web pour visualiser les rapports de test.
 
