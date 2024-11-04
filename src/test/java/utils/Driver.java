@@ -41,11 +41,11 @@ public class Driver {
     public static BaseOptions getIOSApps() {
         BaseOptions options = new BaseOptions()
                 .amend("appium:platformName", "iOS")
-                .amend("appium:platformVersion", "16.0") // iOS versiyonunuzu buraya yazın
-                .amend("appium:deviceName", "iPhone 14") // Cihaz adınızı buraya yazın
+                .amend("appium:platformVersion", "16.0")
+                .amend("appium:deviceName", "iPhone 14")
                 .amend("appium:automationName", "XCUITest")
-                .amend("appium:udid", "YOUR_DEVICE_UDID") // Cihazınızın UDID'sini buraya yazın
-                .amend("appium:bundleId", "YOUR_APP_BUNDLE_ID") // Uygulamanızın bundle ID'sini buraya yazın
+                .amend("appium:udid", "YOUR_DEVICE_UDID")
+                .amend("appium:bundleId", "YOUR_APP_BUNDLE_ID")
                 .amend("appium:noReset", true)
                 .amend("appium:autoGrantPermissions", true)
                 .amend("appium:newCommandTimeout", 3600)

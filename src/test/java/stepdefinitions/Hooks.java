@@ -275,7 +275,6 @@ public class Hooks {
         }
     }
 
-    // ... (gererPopupsEtCookies ve stopVideoRecording metodları aynı kalıyor)
 
     @After
     public void terminer(Scenario scenario) {
@@ -344,10 +343,10 @@ public class Hooks {
     }
 
     public static String getAppPackage() {
-        return "com.radiofrance.radio.radiofrance.android";
+        return "com.planity.android";
     }
 
     public static String getBundleId() {
-        return "com.yourcompany.planity"; // iOS uygulamanızın bundle ID'sini buraya yazın
+        return "com.yourcompany.planity";
     }
 }

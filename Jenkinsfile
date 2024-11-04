@@ -8,18 +8,14 @@ pipeline {
     }
 
     environment {
-        // Base Configuration
+
         JAVA_HOME = "/usr/local/opt/openjdk@17"
         M2_HOME = tool 'maven'
         PATH = "${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}"
         MAVEN_OPTS = '-Xmx3072m'
-
-        // Project Information
         PROJECT_NAME = 'Planity Web Et Mobile BDD Automation Tests'
         PROJECT_VERSION = '1.0.0'
         TEAM_NAME = 'Quality Assurance'
-
-        // Directories
         TIMESTAMP = new Date().format('yyyy-MM-dd_HH-mm-ss')
         ALLURE_RESULTS = 'target/allure-results'
         CUCUMBER_REPORTS = 'target/cucumber-reports'
