@@ -1,4 +1,4 @@
-# **PlanityWebEtMobile**
+
 
 ## **Planity Web et Mobile Testing**
 
@@ -29,9 +29,6 @@ Les fonctionnalités suivantes sont mises en œuvre dans l'application Planity :
 - 🔐 **Inscription et Authentification des Utilisateurs** : Les utilisateurs peuvent s'inscrire et se connecter à l'application.
 - 👤 **Gestion du Profil Utilisateur** : Les utilisateurs peuvent consulter et mettre à jour leur profil.
 
-# **PlanityWebEtMobile**
-
-## **Planity Web et Mobile Testing**
 
 
 ## **Aperçu du Projet**
