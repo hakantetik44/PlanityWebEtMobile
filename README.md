@@ -89,25 +89,6 @@ Les fonctionnalités suivantes sont mises en œuvre dans l'application Planity :
 # **PlanityWebEtMobile**
 
 ## **Planity Web et Mobile Testing**
-
-## **Table des Matières**
-- [Aperçu du Projet](#aperçu-du-projet)
-- [Fonctionnalités](#fonctionnalités)
-- [Technologies Utilisées](#technologies-utilisées)
-- [Prise en Main](#prise-en-main)
-  - [Prérequis](#prérequis)
-  - [Installation](#installation)
-  - [Configuration](#configuration)
-- [Exécution des Tests](#exécution-des-tests)
-- [Structure des Tests](#structure-des-tests)
-- [Rapports](#rapports)
-- [Contributions](#contributions)
-- [Licence](#licence)
-
-## **Aperçu du Projet**
-
-### **Exemple de Fonctionnalité : Recherche de Coiffeur**
-
 Contributions
 Les contributions sont les bienvenues ! Si vous avez des suggestions d'améliorations ou de fonctionnalités, veuillez créer un problème ou soumettre une demande de tirage.Technologies Utilisées
 ☕ Java 17 : Langage de programmation utilisé pour le développement des tests.
