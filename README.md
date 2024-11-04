@@ -106,17 +106,6 @@ Les fonctionnalités suivantes sont mises en œuvre dans l'application Planity :
 
 ## **Aperçu du Projet**
 
-Planity est une application web et mobile conçue pour faciliter la recherche et la réservation de coiffeurs. Ce dépôt contient des tests automatisés qui valident les fonctionnalités de l'application Planity en utilisant Cucumber pour le développement orienté comportement (BDD), Selenium pour les tests web, et Appium pour les tests mobiles.
-
-## **Fonctionnalités**
-
-Les fonctionnalités suivantes sont mises en œuvre dans l'application Planity :
-
-- 🔍 **Recherche de Coiffeurs** : Les utilisateurs peuvent rechercher des coiffeurs dans des emplacements spécifiques.
-- 📅 **Gestion des Réservations** : Les utilisateurs peuvent gérer leurs réservations avec des coiffeurs.
-- 🔐 **Inscription et Authentification des Utilisateurs** : Les utilisateurs peuvent s'inscrire et se connecter à l'application.
-- 👤 **Gestion du Profil Utilisateur** : Les utilisateurs peuvent consulter et mettre à jour leur profil.
-
 ### **Exemple de Fonctionnalité : Recherche de Coiffeur**
 
 Contributions
